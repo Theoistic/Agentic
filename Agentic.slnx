@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="Agentic.Cli/Agentic.Cli.csproj" Id="3ac86002-6f4f-4437-ad7d-44d41239c11e" />
+  <Project Path="Agentic/Agentic.csproj" />
+</Solution>
