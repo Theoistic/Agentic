@@ -4,6 +4,7 @@ namespace Agentic;
 //  DI registration
 // ═══════════════════════════════════════════════════════════════════════════
 
+/// <summary>Options for configuring the <see cref="IStore"/> registered by <see cref="StoreExtensions.AddStore"/>.</summary>
 public sealed class StoreOptions
 {
     /// <summary><c>sqlite</c> (default) or <c>postgres</c>.</summary>

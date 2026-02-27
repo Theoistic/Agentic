@@ -9,34 +9,63 @@ namespace Agentic;
 //  Tool attributes & interfaces
 // ═══════════════════════════════════════════════════════════════════════════
 
+/// <summary>
+/// Marks a public method on an <see cref="IAgentToolSet"/> as an agent tool.
+/// The method will be discovered by <see cref="ToolRegistry"/> and exposed to the model.
+/// </summary>
+/// <param name="name">Optional explicit tool name. Defaults to the snake_case form of the method name.</param>
 [AttributeUsage(AttributeTargets.Method)]
 public sealed class ToolAttribute(string? name = null) : Attribute { public string? Name { get; } = name; }
 
+/// <summary>
+/// Provides a description for a tool method parameter, included in the JSON Schema
+/// sent to the model so it knows how to fill the argument.
+/// </summary>
+/// <param name="description">Human-readable description of the parameter.</param>
 [AttributeUsage(AttributeTargets.Parameter)]
 public sealed class ToolParamAttribute(string description) : Attribute { public string Description { get; } = description; }
 
+/// <summary>Marker interface for classes that expose one or more <see cref="ToolAttribute"/>-decorated methods.</summary>
 public interface IAgentToolSet { }
+/// <summary>Extension of <see cref="IAgentToolSet"/> for tool sets that hold resources requiring async cleanup.</summary>
 public interface IDisposableToolSet : IAgentToolSet { ValueTask DisposeAsync(); }
 
 // ═══════════════════════════════════════════════════════════════════════════
 //  Tool registry
 // ═══════════════════════════════════════════════════════════════════════════
 
+/// <summary>A lightweight descriptor for a registered tool, used when listing tools to MCP clients.</summary>
 public sealed class AgentToolDescriptor
 {
+    /// <summary>Snake_case tool name exposed to the model.</summary>
     public required string Name { get; init; }
+    /// <summary>Human-readable description sourced from <see cref="System.ComponentModel.DescriptionAttribute"/>.</summary>
     public string? Description { get; init; }
+    /// <summary>JSON Schema object describing the tool's input parameters.</summary>
     public JsonElement? ParameterSchema { get; init; }
 }
 
+/// <summary>
+/// Central registry for all <see cref="IAgentToolSet"/> instances.
+/// Discovers <see cref="ToolAttribute"/>-decorated methods via reflection, builds their JSON Schemas,
+/// and dispatches tool calls from the model at runtime.
+/// </summary>
 public sealed class ToolRegistry
 {
     private readonly List<IAgentToolSet> _sets = [];
     private readonly Dictionary<string, ReflectedTool> _tools = new(StringComparer.Ordinal);
 
+    /// <summary>All registered tool set instances, in registration order.</summary>
     public IEnumerable<IAgentToolSet> ToolSets => _sets;
+    /// <summary>Total number of individual tools registered across all tool sets.</summary>
     public int Count => _tools.Count;
 
+    /// <summary>
+    /// Registers all <see cref="ToolAttribute"/>-decorated methods from <paramref name="toolSet"/>.
+    /// </summary>
+    /// <typeparam name="T">The tool set type to register.</typeparam>
+    /// <param name="toolSet">An instance whose public methods will be scanned.</param>
+    /// <param name="replaceExisting">When <c>true</c>, any previously registered tools from the same type are removed first.</param>
     public void Register<T>(T toolSet, bool replaceExisting = false) where T : IAgentToolSet
     {
         if (replaceExisting)
@@ -62,10 +91,18 @@ public sealed class ToolRegistry
         }
     }
 
+    /// <summary>Returns a read-only snapshot of all registered tool descriptors.</summary>
     public IReadOnlyList<AgentToolDescriptor> GetAllDescriptors() =>
         _tools.Values.Select(t => new AgentToolDescriptor
         { Name = t.Name, Description = t.Description, ParameterSchema = t.ParameterSchema }).ToList();
 
+    /// <summary>
+    /// Invokes the named tool with the provided JSON arguments and returns its string result.
+    /// </summary>
+    /// <param name="name">The tool name as registered (snake_case).</param>
+    /// <param name="arguments">JSON object containing the argument values.</param>
+    /// <param name="ct">Cancellation token forwarded to the tool method.</param>
+    /// <exception cref="KeyNotFoundException">Thrown when <paramref name="name"/> is not registered.</exception>
     public async Task<string> InvokeAsync(string name, JsonElement? arguments, CancellationToken ct = default)
     {
         if (!_tools.TryGetValue(name, out var tool))
@@ -156,12 +193,15 @@ public sealed class ToolRegistry
 //  JSON Schema helpers
 // ═══════════════════════════════════════════════════════════════════════════
 
+/// <summary>Helpers for building and parsing JSON Schema fragments used in tool parameter definitions.</summary>
 public static class ToolSchema
 {
     private static readonly JsonSerializerOptions s_opts = new() { DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull };
 
+    /// <summary>Parses a raw JSON string into a cloned <see cref="JsonElement"/>.</summary>
     public static JsonElement Parse(string json) { using var d = JsonDocument.Parse(json); return d.RootElement.Clone(); }
 
+    /// <summary>Builds an <c>object</c> JSON Schema from a property map and optional required list.</summary>
     public static JsonElement Object(Dictionary<string, JsonElement> properties, IEnumerable<string>? required = null)
     {
         var obj = new Dictionary<string, object> { ["type"] = "object", ["properties"] = properties };
@@ -169,14 +209,20 @@ public static class ToolSchema
         return SerializeToElement(obj);
     }
 
+    /// <summary>Creates a <c>string</c> JSON Schema property with an optional description.</summary>
     public static JsonElement String(string? desc = null) => Prop("string", desc);
+    /// <summary>Creates a <c>number</c> JSON Schema property with an optional description.</summary>
     public static JsonElement Number(string? desc = null) => Prop("number", desc);
+    /// <summary>Creates an <c>integer</c> JSON Schema property with an optional description.</summary>
     public static JsonElement Integer(string? desc = null) => Prop("integer", desc);
+    /// <summary>Creates a <c>boolean</c> JSON Schema property with an optional description.</summary>
     public static JsonElement Boolean(string? desc = null) => Prop("boolean", desc);
 
+    /// <summary>Creates an <c>array</c> JSON Schema property with an item schema and optional description.</summary>
     public static JsonElement Array(JsonElement items, string? desc = null)
     { var o = new Dictionary<string, object> { ["type"] = "array", ["items"] = items }; if (desc is not null) o["description"] = desc; return SerializeToElement(o); }
 
+    /// <summary>Creates a <c>string</c> JSON Schema property restricted to the given enum values.</summary>
     public static JsonElement Enum(IEnumerable<string> values, string? desc = null)
     { var o = new Dictionary<string, object> { ["type"] = "string", ["enum"] = values.ToList() }; if (desc is not null) o["description"] = desc; return SerializeToElement(o); }
 

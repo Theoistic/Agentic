@@ -9,11 +9,16 @@ namespace Agentic;
 //  Configuration
 // ═══════════════════════════════════════════════════════════════════════════
 
+/// <summary>Configuration for an <see cref="LM"/> client instance.</summary>
 public class LMConfig
 {
+    /// <summary>Model identifier sent in every request (e.g. <c>"gpt-4o"</c>).</summary>
     public string ModelName { get; set; } = "liquid/lfm2.5-1.2b";
+    /// <summary>Base URL of the OpenAI-compatible API server (e.g. <c>"http://localhost:1234"</c>).</summary>
     public string Endpoint { get; set; } = "http://localhost:5454";
+    /// <summary>Optional Bearer token sent in the <c>Authorization</c> header.</summary>
     public string ApiKey { get; set; } = "";
+    /// <summary>Model identifier used for embedding requests. Required when calling <see cref="LM.EmbedAsync"/> or <see cref="LM.EmbedBatchAsync"/>.</summary>
     public string? EmbeddingModel { get; set; }
 }
 
@@ -21,12 +26,22 @@ public class LMConfig
 //  LM client
 // ═══════════════════════════════════════════════════════════════════════════
 
+/// <summary>Thrown when an <see cref="LM"/> API call fails with an HTTP error or network problem.</summary>
+/// <param name="message">Human-readable error description.</param>
+/// <param name="statusCode">HTTP status code (0 when the server was unreachable).</param>
+/// <param name="body">Raw response body, if available.</param>
 public sealed class LMException(string message, int statusCode, string? body) : Exception(message)
 {
+    /// <summary>HTTP status code returned by the server (0 when the server was unreachable or timed out).</summary>
     public int StatusCode { get; } = statusCode;
+    /// <summary>Raw HTTP response body, or <c>null</c> when none was available.</summary>
     public string? ResponseBody { get; } = body;
 }
 
+/// <summary>
+/// OpenAI-compatible REST client supporting <c>/v1/responses</c> (streaming + non-streaming),
+/// <c>/v1/chat/completions</c> (vision), and <c>/v1/embeddings</c>.
+/// </summary>
 public sealed class LM : IDisposable
 {
     private readonly HttpClient _http;
@@ -39,6 +54,9 @@ public sealed class LM : IDisposable
         PropertyNameCaseInsensitive = true,
     };
 
+    /// <summary>Initialises a new LM client.</summary>
+    /// <param name="config">Connection and model configuration.</param>
+    /// <param name="httpClient">Optional shared <see cref="HttpClient"/>; when <c>null</c> a new instance is created and owned by this class.</param>
     public LM(LMConfig config, HttpClient? httpClient = null)
     {
         ArgumentNullException.ThrowIfNull(config);
@@ -50,6 +68,14 @@ public sealed class LM : IDisposable
             _http.DefaultRequestHeaders.Authorization = new("Bearer", _config.ApiKey);
     }
 
+    /// <summary>Sends a single-turn request to <c>/v1/responses</c> and returns the full response.</summary>
+    /// <param name="input">User message text.</param>
+    /// <param name="instructions">Optional system/instruction text.</param>
+    /// <param name="previousResponseId">ID of the previous response for multi-turn chaining.</param>
+    /// <param name="temperature">Sampling temperature.</param>
+    /// <param name="tools">Tool definitions (e.g. MCP servers) available to the model.</param>
+    /// <param name="reasoning">Optional reasoning configuration.</param>
+    /// <param name="ct">Cancellation token.</param>
     public async Task<ResponseResponse> RespondAsync(
         string input, string? instructions = null, string? previousResponseId = null,
         double temperature = 0, List<ToolDefinition>? tools = null,
@@ -63,6 +89,14 @@ public sealed class LM : IDisposable
         }, ct);
     }
 
+    /// <summary>Sends a multi-turn conversation history to <c>/v1/responses</c> and returns the full response.</summary>
+    /// <param name="input">Ordered list of conversation turns to replay.</param>
+    /// <param name="instructions">Optional system/instruction text.</param>
+    /// <param name="previousResponseId">ID of the previous response for multi-turn chaining.</param>
+    /// <param name="temperature">Sampling temperature.</param>
+    /// <param name="tools">Tool definitions available to the model.</param>
+    /// <param name="reasoning">Optional reasoning configuration.</param>
+    /// <param name="ct">Cancellation token.</param>
     public async Task<ResponseResponse> RespondAsync(
         IEnumerable<ResponseInput> input, string? instructions = null, string? previousResponseId = null,
         double temperature = 0, List<ToolDefinition>? tools = null,

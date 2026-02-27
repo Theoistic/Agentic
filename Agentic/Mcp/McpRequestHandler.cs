@@ -7,11 +7,16 @@ namespace Agentic.Mcp;
 //  Options
 // ═══════════════════════════════════════════════════════════════════════════
 
+/// <summary>Configuration for the Agentic MCP server registered via <see cref="McpServerExtensions.AddAgenticMcp"/>.</summary>
 public sealed class McpServerOptions
 {
+    /// <summary>Name reported to MCP clients during the <c>initialize</c> handshake.</summary>
     public string ServerName { get; set; } = "Agentic";
+    /// <summary>Version string reported to MCP clients during the <c>initialize</c> handshake.</summary>
     public string ServerVersion { get; set; } = "1.0.0";
+    /// <summary>MCP protocol version advertised to clients.</summary>
     public string ProtocolVersion { get; set; } = "2025-03-26";
+    /// <summary>Optional instruction text returned in the <c>initialize</c> response.</summary>
     public string? Instructions { get; set; }
 
     /// <summary>
@@ -41,6 +46,10 @@ public sealed class McpServerOptions
 //  Request handler
 // ═══════════════════════════════════════════════════════════════════════════
 
+/// <summary>
+/// Handles incoming JSON-RPC 2.0 requests from MCP clients, dispatching to tools,
+/// resources, prompts, and protocol methods (<c>initialize</c>, <c>ping</c>, etc.).
+/// </summary>
 public sealed class McpRequestHandler
 {
     private readonly Agentic.ToolRegistry _tools;
@@ -55,6 +64,7 @@ public sealed class McpRequestHandler
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
     };
 
+    /// <summary>Initialises the handler with all required services (resolved from DI).</summary>
     public McpRequestHandler(Agentic.ToolRegistry tools, ResourceRegistry resources, PromptRegistry prompts,
         McpServerOptions options, ILogger<McpRequestHandler> logger)
     {
@@ -69,6 +79,10 @@ public sealed class McpRequestHandler
     public void LogRequest(string remoteIp, string verb) =>
         _logger.LogInformation("MCP {Verb} from {Remote}", verb, remoteIp);
 
+    /// <summary>
+    /// Dispatches a single JSON-RPC request to the appropriate MCP handler.
+    /// Returns <c>null</c> for notifications (requests without an <c>id</c>) or when the client disconnects.
+    /// </summary>
     public async Task<JsonRpcResponse?> HandleAsync(JsonRpcRequest request, CancellationToken ct = default)
     {
         _logger.LogDebug("MCP <-- {Method} (id={Id})", request.Method, request.Id);

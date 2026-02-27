@@ -8,21 +8,40 @@ namespace Agentic;
 //  Agent
 // ═══════════════════════════════════════════════════════════════════════════
 
+/// <summary>
+/// Multi-turn LLM agent with streaming, MCP tool orchestration, workflow execution,
+/// and optional context compaction.
+/// </summary>
 public sealed class Agent : IAsyncDisposable
 {
     private readonly LM _lm;
     private string? _lastResponseId;
 
+    /// <summary>The tool registry used by this agent. Pre-populated tools are sent to MCP servers.</summary>
     public ToolRegistry Tools { get; }
+    /// <summary>Configuration options supplied at construction time.</summary>
     public AgentOptions Options { get; }
+    /// <summary>Context manager responsible for token tracking and compaction. <c>null</c> when compaction is disabled.</summary>
     public ContextManager? Context { get; }
 
+    /// <summary>Initialises a new agent with its own internal <see cref="ToolRegistry"/>.</summary>
+    /// <param name="lm">The LM client used for all API calls.</param>
+    /// <param name="options">Agent options; a default instance is used when <c>null</c>.</param>
     public Agent(LM lm, AgentOptions? options = null) { _lm = lm; Tools = new(); Options = options ?? new(); Context = Options.Compaction is not null ? new ContextManager(Options.Compaction) : null; }
+    /// <summary>Initialises a new agent with a shared <see cref="ToolRegistry"/>.</summary>
+    /// <param name="lm">The LM client used for all API calls.</param>
+    /// <param name="tools">A shared tool registry (e.g. injected via DI).</param>
+    /// <param name="options">Agent options; a default instance is used when <c>null</c>.</param>
     public Agent(LM lm, ToolRegistry tools, AgentOptions? options = null) { _lm = lm; Tools = tools; Options = options ?? new(); Context = Options.Compaction is not null ? new ContextManager(Options.Compaction) : null; }
 
+    /// <summary>Registers a tool set and returns this agent for fluent chaining.</summary>
+    /// <typeparam name="T">The tool set type.</typeparam>
+    /// <param name="toolSet">The tool set instance to register.</param>
+    /// <param name="replaceExisting">When <c>true</c>, any prior registration of the same type is replaced.</param>
     public Agent RegisterTools<T>(T toolSet, bool replaceExisting = false) where T : IAgentToolSet
     { Tools.Register(toolSet, replaceExisting); return this; }
 
+    /// <summary>Clears the response-chain ID and resets the context manager, starting a fresh conversation.</summary>
     public void ResetConversation() { _lastResponseId = null; Context?.Reset(); }
 
     /// <summary>
@@ -42,7 +61,13 @@ public sealed class Agent : IAsyncDisposable
         return checkpoint;
     }
 
-    /// <summary>Single-shot /v1/responses request with MCP tools.</summary>
+    /// <summary>Single-shot /v1/responses request with MCP tools. Does not maintain conversation history.</summary>
+    /// <param name="input">The user message to send.</param>
+    /// <param name="mcpServerUrl">URL of the MCP server that supplies tools.</param>
+    /// <param name="serverLabel">Optional label for the MCP server; defaults to <c>"agentic"</c>.</param>
+    /// <param name="allowedTools">Optional allow-list of tool names; <c>null</c> means all tools.</param>
+    /// <param name="mcpHeaders">Optional HTTP headers forwarded to the MCP server.</param>
+    /// <param name="ct">Cancellation token.</param>
     public async Task<AgentResponse> RunAsync(
         string input, string mcpServerUrl, string? serverLabel = null,
         List<string>? allowedTools = null, Dictionary<string, string>? mcpHeaders = null,
@@ -55,7 +80,13 @@ public sealed class Agent : IAsyncDisposable
         return ParseOutput(resp);
     }
 
-    /// <summary>Multi-turn /v1/responses with previous_response_id chaining.</summary>
+    /// <summary>Multi-turn /v1/responses with <c>previous_response_id</c> chaining. Maintains conversation history across calls.</summary>
+    /// <param name="input">The user message for this turn.</param>
+    /// <param name="mcpServerUrl">URL of the MCP server that supplies tools.</param>
+    /// <param name="serverLabel">Optional label for the MCP server; defaults to <c>"agentic"</c>.</param>
+    /// <param name="allowedTools">Optional allow-list of tool names; <c>null</c> means all tools.</param>
+    /// <param name="mcpHeaders">Optional HTTP headers forwarded to the MCP server.</param>
+    /// <param name="ct">Cancellation token.</param>
     public async Task<AgentResponse> ChatAsync(
         string input, string mcpServerUrl, string? serverLabel = null,
         List<string>? allowedTools = null, Dictionary<string, string>? mcpHeaders = null,
@@ -88,7 +119,13 @@ public sealed class Agent : IAsyncDisposable
         return result;
     }
 
-    /// <summary>Single-shot streaming /v1/responses with real-time events.</summary>
+    /// <summary>Single-shot streaming /v1/responses with real-time events. Does not maintain conversation history.</summary>
+    /// <param name="input">The user message to send.</param>
+    /// <param name="mcpServerUrl">URL of the MCP server that supplies tools.</param>
+    /// <param name="serverLabel">Optional label for the MCP server; defaults to <c>"agentic"</c>.</param>
+    /// <param name="allowedTools">Optional allow-list of tool names; <c>null</c> means all tools.</param>
+    /// <param name="mcpHeaders">Optional HTTP headers forwarded to the MCP server.</param>
+    /// <param name="ct">Cancellation token.</param>
     public async Task<AgentResponse> RunStreamAsync(
         string input, string mcpServerUrl, string? serverLabel = null,
         List<string>? allowedTools = null, Dictionary<string, string>? mcpHeaders = null,
@@ -100,7 +137,13 @@ public sealed class Agent : IAsyncDisposable
             tools: [ToolDefinition.Mcp(serverLabel ?? "agentic", mcpServerUrl, allowedTools, mcpHeaders)], ct: ct));
     }
 
-    /// <summary>Multi-turn streaming /v1/responses with previous_response_id chaining.</summary>
+    /// <summary>Multi-turn streaming /v1/responses with <c>previous_response_id</c> chaining and real-time events.</summary>
+    /// <param name="input">The user message for this turn.</param>
+    /// <param name="mcpServerUrl">URL of the MCP server that supplies tools.</param>
+    /// <param name="serverLabel">Optional label for the MCP server; defaults to <c>"agentic"</c>.</param>
+    /// <param name="allowedTools">Optional allow-list of tool names; <c>null</c> means all tools.</param>
+    /// <param name="mcpHeaders">Optional HTTP headers forwarded to the MCP server.</param>
+    /// <param name="ct">Cancellation token.</param>
     public async Task<AgentResponse> ChatStreamAsync(
         string input, string mcpServerUrl, string? serverLabel = null,
         List<string>? allowedTools = null, Dictionary<string, string>? mcpHeaders = null,
@@ -138,6 +181,14 @@ public sealed class Agent : IAsyncDisposable
     /// Executes a multi-step workflow. The agent is guided through the defined steps
     /// and each step is verified before advancing. Uses streaming for real-time output.
     /// </summary>
+    /// <param name=\"workflow\">The workflow definition containing ordered steps.</param>
+    /// <param name=\"input\">The initial user message that starts the workflow.</param>
+    /// <param name=\"mcpServerUrl\">URL of the MCP server that supplies tools.</param>
+    /// <param name=\"serverLabel\">Optional label for the MCP server; defaults to <c>\"agentic\"</c>.</param>
+    /// <param name=\"allowedTools\">Optional allow-list of tool names; <c>null</c> means all tools.</param>
+    /// <param name=\"mcpHeaders\">Optional HTTP headers forwarded to the MCP server.</param>
+    /// <param name=\"maxRounds\">Maximum number of model turns before the workflow is aborted.</param>
+    /// <param name=\"ct\">Cancellation token.</param>
     public async Task<WorkflowResult> RunWorkflowAsync(
         Workflow workflow, string input, string mcpServerUrl,
         string? serverLabel = null, List<string>? allowedTools = null,

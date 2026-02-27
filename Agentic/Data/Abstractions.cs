@@ -9,6 +9,11 @@ namespace Agentic;
 //  Storage abstractions
 // ═══════════════════════════════════════════════════════════════════════════
 
+/// <summary>A ranked result from a vector similarity search.</summary>
+/// <typeparam name="T">The document type stored in the collection.</typeparam>
+/// <param name="Id">The document's unique identifier.</param>
+/// <param name="Document">The retrieved document.</param>
+/// <param name="Score">Cosine similarity score in the range [0, 1].</param>
 public sealed record SearchResult<T>(string Id, T Document, float Score) where T : class;
 
 /// <summary>
@@ -21,10 +26,15 @@ public interface ICollection<T> where T : class
 {
     /// <summary>Insert with an auto-generated ID. Returns the new ID.</summary>
     Task<string> InsertAsync(T doc, float[]? embedding = null, CancellationToken ct = default);
+    /// <summary>Insert or replace the document with the given <paramref name="id"/>. Preserves any existing embedding when none is supplied.</summary>
     Task UpsertAsync(string id, T doc, float[]? embedding = null, CancellationToken ct = default);
+    /// <summary>Removes the document with the given <paramref name="id"/>.</summary>
     Task DeleteAsync(string id, CancellationToken ct = default);
+    /// <summary>Returns the document with the given <paramref name="id"/>, or <c>null</c> if not found.</summary>
     Task<T?> GetAsync(string id, CancellationToken ct = default);
+    /// <summary>Streams all documents in the collection as <c>(id, document)</c> pairs.</summary>
     IAsyncEnumerable<(string Id, T Document)> ScanAsync(CancellationToken ct = default);
+    /// <summary>Returns the top <paramref name="topK"/> documents ranked by cosine similarity to <paramref name="query"/>.</summary>
     Task<List<SearchResult<T>>> SearchAsync(float[] query, int topK = 5, CancellationToken ct = default);
 }
 
@@ -34,6 +44,7 @@ public interface ICollection<T> where T : class
 /// </summary>
 public interface IStore : IDisposable
 {
+    /// <summary>Gets or creates a named collection for documents of type <typeparamref name="T"/>.</summary>
     ICollection<T> Collection<T>(string name) where T : class;
 }
 
@@ -96,6 +107,7 @@ public static class VectorMath
 //  InMemoryStore
 // ═══════════════════════════════════════════════════════════════════════════
 
+/// <summary>Volatile in-memory <see cref="IStore"/> implementation backed by concurrent dictionaries. Intended for testing and short-lived scenarios.</summary>
 public sealed class InMemoryStore : IStore
 {
     private readonly ConcurrentDictionary<string, object> _cols = new();

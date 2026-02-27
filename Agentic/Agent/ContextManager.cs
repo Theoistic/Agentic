@@ -44,15 +44,25 @@ public sealed class CompactionOptions
 /// <summary>Structured machine-readable checkpoint produced by compaction.</summary>
 public sealed class Checkpoint
 {
+    /// <summary>High-level goal or objective of the session.</summary>
     [JsonPropertyName("objective")]        public string Objective { get; set; } = "";
+    /// <summary>Description of what has been accomplished so far.</summary>
     [JsonPropertyName("current_status")]   public string CurrentStatus { get; set; } = "";
+    /// <summary>Ordered list of actions still to be completed.</summary>
     [JsonPropertyName("next_steps")]       public List<string> NextSteps { get; set; } = [];
+    /// <summary>Important decisions made and their rationale.</summary>
     [JsonPropertyName("key_decisions")]    public List<string> KeyDecisions { get; set; } = [];
+    /// <summary>Hard constraints, non-goals, and invariants to preserve.</summary>
     [JsonPropertyName("constraints")]      public List<string> Constraints { get; set; } = [];
+    /// <summary>Unresolved questions, risks, or edge cases.</summary>
     [JsonPropertyName("open_questions")]   public List<string> OpenQuestions { get; set; } = [];
+    /// <summary>Key files, commands, outputs, or URLs produced during the session.</summary>
     [JsonPropertyName("key_artifacts")]    public List<string> KeyArtifacts { get; set; } = [];
+    /// <summary>UTC timestamp when this checkpoint was created.</summary>
     [JsonPropertyName("created_at")]       public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    /// <summary>Sequential index of this compaction (1-based).</summary>
     [JsonPropertyName("compaction_count")] public int CompactionCount { get; set; }
+    /// <summary>The compression level used to produce this checkpoint.</summary>
     [JsonPropertyName("level")]            public CompactionLevel Level { get; set; }
 
     /// <summary>Render the checkpoint as a prompt section the LM can consume.</summary>
@@ -93,10 +103,14 @@ public sealed class Checkpoint
 /// <summary>A single entry in the tracked conversation history.</summary>
 public sealed class ConversationEntry
 {
+    /// <summary>Speaker role: <c>"user"</c>, <c>"assistant"</c>, <c>"tool_call"</c>, or <c>"tool_result"</c>.</summary>
     [JsonPropertyName("role")]      public string Role { get; set; } = "";
+    /// <summary>Text content or tool argument / result payload for this entry.</summary>
     [JsonPropertyName("content")]   public string Content { get; set; } = "";
+    /// <summary>Name of the tool involved (only set for <c>tool_call</c> and <c>tool_result</c> roles).</summary>
     [JsonPropertyName("tool_name"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? ToolName { get; set; }
+    /// <summary>UTC timestamp when this entry was recorded.</summary>
     [JsonPropertyName("timestamp")] public DateTime Timestamp { get; set; } = DateTime.UtcNow;
 }
 
@@ -125,23 +139,35 @@ public sealed class ContextManager
 
     // ── Observable state ─────────────────────────────────────────────────
 
+    /// <summary>Input token count from the most recent API call.</summary>
     public int LastInputTokens => _lastInputTokens;
+    /// <summary>Output token count from the most recent API call.</summary>
     public int LastOutputTokens => _lastOutputTokens;
+    /// <summary>Total token count from the most recent API call.</summary>
     public int LastTotalTokens => _lastTotalTokens;
 
+    /// <summary>Ratio of <see cref="LastInputTokens"/> to <see cref="CompactionOptions.MaxContextTokens"/> (0–1).</summary>
     public double ContextUsageRatio => Options.MaxContextTokens > 0
         ? (double)_lastInputTokens / Options.MaxContextTokens : 0;
 
+    /// <summary><c>true</c> when auto-compaction is enabled and the context usage ratio has reached <see cref="CompactionOptions.CompactionThreshold"/>.</summary>
     public bool ShouldCompact => Options.AutoCompact
         && _lastInputTokens > 0
         && ContextUsageRatio >= Options.CompactionThreshold;
 
+    /// <summary>The most recently produced compaction checkpoint, or <c>null</c> if compaction has not run yet.</summary>
     public Checkpoint? LastCheckpoint => _lastCheckpoint;
+    /// <summary><c>true</c> when at least one compaction checkpoint exists.</summary>
     public bool IsCheckpointed => _lastCheckpoint is not null;
+    /// <summary>The full conversation history tracked since the last compaction (or since construction).</summary>
     public IReadOnlyList<ConversationEntry> History => _history;
+    /// <summary>Number of compactions performed during this manager's lifetime.</summary>
     public int CompactionCount => _compactionCount;
+    /// <summary>Constraints pinned across compactions; always merged into new checkpoints.</summary>
     public IReadOnlyList<string> PinnedConstraints => _pinnedConstraints;
 
+    /// <summary>Initialises a new context manager with the given compaction options.</summary>
+    /// <param name="options">Compaction settings; defaults are used when <c>null</c>.</param>
     public ContextManager(CompactionOptions? options = null)
     {
         Options = options ?? new();
@@ -149,18 +175,23 @@ public sealed class ContextManager
 
     // ── Recording ────────────────────────────────────────────────────────
 
+    /// <summary>Appends a user input message to the conversation history.</summary>
     public void RecordUserInput(string input) =>
         _history.Add(new() { Role = "user", Content = input });
 
+    /// <summary>Appends an assistant response to the conversation history.</summary>
     public void RecordAssistantResponse(string text) =>
         _history.Add(new() { Role = "assistant", Content = text });
 
+    /// <summary>Appends a tool call entry to the conversation history.</summary>
     public void RecordToolCall(string name, string arguments) =>
         _history.Add(new() { Role = "tool_call", Content = arguments, ToolName = name });
 
+    /// <summary>Appends a tool result entry to the conversation history.</summary>
     public void RecordToolResult(string name, string result) =>
         _history.Add(new() { Role = "tool_result", Content = result, ToolName = name });
 
+    /// <summary>Updates the cached token usage figures from the latest API response.</summary>
     public void UpdateTokenUsage(int inputTokens, int outputTokens, int totalTokens)
     {
         _lastInputTokens = inputTokens;
@@ -170,12 +201,14 @@ public sealed class ContextManager
 
     // ── Pinned constraints ───────────────────────────────────────────────
 
+    /// <summary>Adds a constraint that will be merged into every future checkpoint and never discarded by compaction.</summary>
     public void PinConstraint(string constraint)
     {
         if (!_pinnedConstraints.Contains(constraint))
             _pinnedConstraints.Add(constraint);
     }
 
+    /// <summary>Removes a previously pinned constraint. Returns <c>true</c> if the constraint was found and removed.</summary>
     public bool UnpinConstraint(string constraint) => _pinnedConstraints.Remove(constraint);
 
     // ── Compaction ───────────────────────────────────────────────────────
@@ -298,6 +331,7 @@ public sealed class ContextManager
 
     // ── Reset ────────────────────────────────────────────────────────────
 
+    /// <summary>Clears all history, checkpoints, token counters, and compaction state.</summary>
     public void Reset()
     {
         _history.Clear();
