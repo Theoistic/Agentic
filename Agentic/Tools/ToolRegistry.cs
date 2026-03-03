@@ -107,13 +107,14 @@ public sealed class ToolRegistry
     /// </summary>
     /// <param name="name">The tool name as registered (snake_case).</param>
     /// <param name="arguments">JSON object containing the argument values.</param>
+    /// <param name="context">Optional execution context (headers, properties) injected into tool methods that declare a <see cref="ToolContext"/> parameter.</param>
     /// <param name="ct">Cancellation token forwarded to the tool method.</param>
     /// <exception cref="KeyNotFoundException">Thrown when <paramref name="name"/> is not registered.</exception>
-    public async Task<string> InvokeAsync(string name, JsonElement? arguments, CancellationToken ct = default)
+    public async Task<string> InvokeAsync(string name, JsonElement? arguments, ToolContext? context = null, CancellationToken ct = default)
     {
         if (!_tools.TryGetValue(name, out var tool))
             throw new KeyNotFoundException($"Tool '{name}' is not registered.");
-        var args = BindArguments(tool.Parameters, arguments, JsonOptions, ct);
+        var args = BindArguments(tool.Parameters, arguments, JsonOptions, context, ct);
         var result = tool.Method.Invoke(tool.Instance, args);
         if (result is Task task)
         {
@@ -134,7 +135,7 @@ public sealed class ToolRegistry
         public required ParameterInfo[] Parameters { get; init; }
     }
 
-    private static object?[] BindArguments(ParameterInfo[] parameters, JsonElement? arguments, JsonSerializerOptions? jsonOptions, CancellationToken ct = default)
+    private static object?[] BindArguments(ParameterInfo[] parameters, JsonElement? arguments, JsonSerializerOptions? jsonOptions, ToolContext? context, CancellationToken ct = default)
     {
         var args = new object?[parameters.Length];
         for (int i = 0; i < parameters.Length; i++)
@@ -143,6 +144,7 @@ public sealed class ToolRegistry
             if (p.ParameterType == typeof(JsonElement?))       { args[i] = arguments; continue; }
             if (p.ParameterType == typeof(JsonElement))        { args[i] = arguments ?? default; continue; }
             if (p.ParameterType == typeof(CancellationToken))  { args[i] = ct; continue; }
+            if (p.ParameterType == typeof(ToolContext))         { args[i] = context ?? ToolContext.Empty; continue; }
             if (arguments.HasValue && arguments.Value.TryGetProperty(p.Name!, out var prop))
                 args[i] = JsonSerializer.Deserialize(prop.GetRawText(), p.ParameterType, jsonOptions);
             else if (p.HasDefaultValue) args[i] = p.DefaultValue;
@@ -155,7 +157,8 @@ public sealed class ToolRegistry
     {
         var ps = parameters.Where(p =>
             p.ParameterType != typeof(JsonElement) && p.ParameterType != typeof(JsonElement?)
-            && p.ParameterType != typeof(CancellationToken)).ToList();
+            && p.ParameterType != typeof(CancellationToken)
+            && p.ParameterType != typeof(ToolContext)).ToList();
         if (ps.Count == 0) return ToolSchema.Parse("""{"type":"object"}""");
 
         var props = new Dictionary<string, JsonElement>();

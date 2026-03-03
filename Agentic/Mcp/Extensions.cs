@@ -106,6 +106,8 @@ public static class McpServerExtensions
 
         if (string.IsNullOrWhiteSpace(body)) { ctx.Response.StatusCode = 400; return; }
 
+        var toolContext = BuildToolContext(ctx);
+
         // JSON-RPC 2.0 batch support: body may be a single object or an array
         if (body.TrimStart().StartsWith('['))
         {
@@ -124,7 +126,7 @@ public static class McpServerExtensions
             var responses = new List<JsonRpcResponse>();
             foreach (var req in requests)
             {
-                var resp = await handler.HandleAsync(req, ct);
+                var resp = await handler.HandleAsync(req, toolContext, ct);
                 if (resp is not null) responses.Add(resp);
             }
 
@@ -146,11 +148,19 @@ public static class McpServerExtensions
 
         if (request is null) { ctx.Response.StatusCode = 400; return; }
 
-        var response = await handler.HandleAsync(request, ct);
+        var response = await handler.HandleAsync(request, toolContext, ct);
         if (response is null) { ctx.Response.StatusCode = 202; return; }
 
         ctx.Response.ContentType = "application/json";
         await ctx.Response.WriteAsJsonAsync(response, s_json);
+    }
+
+    private static Agentic.ToolContext BuildToolContext(HttpContext ctx)
+    {
+        var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (key, value) in ctx.Request.Headers)
+            headers[key] = value.ToString();
+        return new Agentic.ToolContext(headers);
     }
 
     private static async Task HandleGet(HttpContext ctx, McpRequestHandler handler)

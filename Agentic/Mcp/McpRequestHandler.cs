@@ -83,7 +83,7 @@ public sealed class McpRequestHandler
     /// Dispatches a single JSON-RPC request to the appropriate MCP handler.
     /// Returns <c>null</c> for notifications (requests without an <c>id</c>) or when the client disconnects.
     /// </summary>
-    public async Task<JsonRpcResponse?> HandleAsync(JsonRpcRequest request, CancellationToken ct = default)
+    public async Task<JsonRpcResponse?> HandleAsync(JsonRpcRequest request, ToolContext? toolContext = null, CancellationToken ct = default)
     {
         _logger.LogDebug("MCP <-- {Method} (id={Id})", request.Method, request.Id);
 
@@ -96,7 +96,7 @@ public sealed class McpRequestHandler
                 "initialize"     => HandleInitialize(request),
                 "ping"           => JsonRpcResponse.Success(request.Id, new { }),
                 "tools/list"     => HandleToolsList(request),
-                "tools/call"     => await HandleToolsCall(request, ct),
+                "tools/call"     => await HandleToolsCall(request, toolContext, ct),
                 "resources/list"           => HandleResourcesList(request),
                 "resources/read"           => await HandleResourcesRead(request),
                 "resources/templates/list" => HandleResourcesTemplatesList(request),
@@ -157,7 +157,7 @@ public sealed class McpRequestHandler
         return JsonRpcResponse.Success(request.Id, new ToolsListResult { Tools = tools });
     }
 
-    private async Task<JsonRpcResponse> HandleToolsCall(JsonRpcRequest request, CancellationToken ct = default)
+    private async Task<JsonRpcResponse> HandleToolsCall(JsonRpcRequest request, ToolContext? toolContext, CancellationToken ct = default)
     {
         var cp = request.Params.HasValue
             ? request.Params.Value.Deserialize<ToolCallParams>(s_json)
@@ -177,7 +177,7 @@ public sealed class McpRequestHandler
 
         try
         {
-            var result = await _tools.InvokeAsync(cp.Name, cp.Arguments, linkedCts.Token);
+            var result = await _tools.InvokeAsync(cp.Name, cp.Arguments, toolContext, linkedCts.Token);
             return JsonRpcResponse.Success(request.Id, new ToolCallResult
             { Content = [new McpContent { Text = result }] });
         }

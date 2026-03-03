@@ -11,7 +11,9 @@ A lightweight .NET library for building LLM-powered agents with streaming chat, 
 
 - **LM client** — OpenAI-compatible REST client (`/v1/responses`) with streaming, embeddings, vision and health-check
 - **Agent** — multi-turn streaming agent with automatic MCP tool orchestration
+- **Workflows** — ordered multi-step execution with per-step async guardrails and automatic retry
 - **Tool system** — define tools with `[Tool]` / `[ToolParam]` attributes; zero boilerplate
+- **Tool context** — HTTP headers from MCP requests are automatically forwarded to tool methods via `ToolContext`
 - **MCP server** — expose any `IAgentToolSet` over HTTP as a Model Context Protocol server in one line
 - **Context compaction** — automatically summarise older conversation history into a structured checkpoint before the context window fills up
 - **Vector storage** — `IStore` / `ICollection<T>` with SQLite (default) or PostgreSQL + pgvector backends
@@ -239,6 +241,191 @@ var response = await agent.ChatStreamAsync(
 ```
 
 > **Precedence:** per-request → per-agent (`AgentOptions.Thinking`) → global (`LMConfig.Thinking`) → not sent (model default).
+
+---
+
+## Workflows
+
+A `Workflow` is an ordered sequence of named steps that the agent executes in turn. Each step carries an instruction for the model and an optional **verification callback** — a guardrail that must return `true` before the agent advances to the next step. If a step's guard fails, the agent is prompted to continue with the remaining steps until every guard passes or `maxRounds` is exhausted.
+
+### Defining a workflow
+
+```csharp
+var workflow = new Workflow("Process Invoice")
+    .Step(
+        name:        "Extract header",
+        instruction: "Extract the invoice number, date, vendor name, currency, and total amount.",
+        verify:      ctx => ctx.ToolInvocations.Any(t => t.ToolName == "save_invoice_header"))
+
+    .Step(
+        name:        "Extract line items",
+        instruction: "Extract every line item into the database.",
+        verify:      ctx => ctx.ToolInvocations.Any(t => t.ToolName == "save_invoice_lines"))
+
+    .Step(
+        name:        "Confirm totals",
+        instruction: "Sum the line item values and confirm they match the invoice total.",
+        verify:      ctx => ctx.ResponseText.Contains("match", StringComparison.OrdinalIgnoreCase));
+```
+
+Steps are verified **in order** — the agent cannot skip ahead. If a guard fails for step N, verification stops there even if later steps would have passed.
+
+### Running a workflow
+
+```csharp
+var result = await agent.RunWorkflowAsync(
+    workflow,
+    input:        "Process the attached invoice.",
+    mcpServerUrl: "http://localhost:5100/mcp",
+    maxRounds:    10);
+
+if (result.Completed)
+    Console.WriteLine("All steps completed.");
+else
+{
+    var pending = result.Steps.Where(s => s.Status == WorkflowStepStatus.Pending);
+    Console.WriteLine($"Incomplete steps: {string.Join(", ", pending.Select(s => s.Name))}");
+}
+```
+
+### WorkflowStep reference
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `Name` | `string` | Short label used in prompts and `StepCompleted` events |
+| `Instruction` | `string` | Text appended to the system prompt describing what the model must do |
+| `Verify` | `Func<WorkflowContext, Task<bool>>?` | Async guardrail; `null` means the step auto-completes after each round |
+| `Status` | `WorkflowStepStatus` | `Pending` or `Completed` — updated by the agent after each round |
+
+### WorkflowContext (inside a verify callback)
+
+| Property | Description |
+|----------|-------------|
+| `ToolInvocations` | All tool calls made so far in this workflow run |
+| `ResponseText` | Accumulated model output across all rounds |
+
+### WorkflowResult
+
+| Property | Description |
+|----------|-------------|
+| `Completed` | `true` when every step reached `Completed` |
+| `Text` | Combined model response text from all rounds |
+| `Steps` | Final state of each step |
+| `ToolInvocations` | All tool calls made during the run, in order |
+
+### Guardrail patterns
+
+```csharp
+// Tool was called at least once
+verify: ctx => ctx.ToolInvocations.Any(t => t.ToolName == "save_data")
+
+// Tool was called with a specific argument value
+verify: ctx => ctx.ToolInvocations
+    .Any(t => t.ToolName == "save_data" && t.Arguments.Contains("\"status\":\"ok\""))
+
+// Model confirmed something in its output
+verify: ctx => ctx.ResponseText.Contains("confirmed", StringComparison.OrdinalIgnoreCase)
+
+// Async database check
+verify: async ctx =>
+{
+    await using var db = await dbFactory.CreateDbContextAsync();
+    return await db.Invoices.AnyAsync(i => i.Id == invoiceId && i.LineItems.Count > 0);
+}
+```
+
+---
+
+## Tool Context
+
+When an MCP request arrives, Agentic automatically captures all HTTP headers and makes them available to tool methods via `ToolContext`. This lets tools read authentication tokens, tenant IDs, correlation headers, or any other request metadata — without `IHttpContextAccessor`.
+
+### Declaring `ToolContext` on a tool method
+
+Add a `ToolContext` parameter to any `[Tool]` method. The framework injects it automatically (just like `CancellationToken`). It is invisible to the model — `ToolContext` never appears in the JSON schema sent to the LLM.
+
+```csharp
+public class InvoiceTools : IAgentToolSet
+{
+    [Tool, Description("Save an invoice header to the database.")]
+    public async Task<string> SaveInvoice(
+        [ToolParam("Invoice number")] string invoiceNumber,
+        [ToolParam("Vendor name")]    string vendor,
+        [ToolParam("Total amount")]   decimal total,
+        ToolContext context,
+        CancellationToken ct)
+    {
+        // Read any header forwarded from the original HTTP request
+        var scope  = context.GetHeader("X-Declaration-Scope");
+        var tenant = context.GetHeader("X-Tenant-Id");
+
+        // ... save to database using scope / tenant ...
+
+        return $"Invoice {invoiceNumber} saved (scope={scope})";
+    }
+}
+```
+
+### How headers flow
+
+```
+HTTP request → MCP endpoint → BuildToolContext(HttpContext)
+  ↓                                  ↓
+  All request headers        ToolContext { Headers, Properties }
+                                         ↓
+                              ToolRegistry.InvokeAsync
+                                         ↓
+                              BindArguments auto-injects ToolContext
+                                         ↓
+                              Your [Tool] method receives it
+```
+
+Every header on the inbound HTTP request is captured into a **case-insensitive** dictionary. Standard headers (`Authorization`, `Content-Type`, …) and custom headers (`X-Tenant-Id`, `X-Correlation-Id`, …) are all available.
+
+### Sending custom headers from a client
+
+Any HTTP client calling the MCP endpoint can attach headers that your tools will receive:
+
+```bash
+curl -X POST http://localhost:5100/mcp \
+  -H "Authorization: Bearer my-key" \
+  -H "X-Tenant-Id: acme-corp" \
+  -H "X-Declaration-Scope: import" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"save_invoice","arguments":{"invoiceNumber":"INV-001","vendor":"Acme","total":1500}}}'
+```
+
+Inside the tool, `context.GetHeader("X-Tenant-Id")` returns `"acme-corp"`.
+
+### ToolContext API reference
+
+| Member | Type | Description |
+|--------|------|-------------|
+| `Headers` | `IReadOnlyDictionary<string, string>` | All HTTP headers from the MCP request (case-insensitive keys) |
+| `Properties` | `IReadOnlyDictionary<string, object?>` | Arbitrary key-value data set by the caller |
+| `GetHeader(name)` | `string?` | Convenience — returns the header value or `null` |
+| `Get<T>(key)` | `T?` | Typed lookup into `Properties`; returns `default` if absent or wrong type |
+| `Empty` | `ToolContext` *(static)* | Singleton with no headers or properties |
+
+### Scope guardrail pattern
+
+A common use-case is enforcing business scope rules inside tools. For example, preventing cross-tenant writes or restricting operations to a declared customs scope:
+
+```csharp
+[Tool, Description("Delete a line item from the declaration.")]
+public Task<string> DeleteLineItem(
+    [ToolParam("Line item ID")] int lineItemId,
+    ToolContext context)
+{
+    var scope = context.GetHeader("X-Declaration-Scope")
+        ?? throw new InvalidOperationException("Missing X-Declaration-Scope header.");
+
+    if (scope != "import")
+        return Task.FromResult($"Denied: delete not allowed under scope '{scope}'.");
+
+    // ... perform delete ...
+    return Task.FromResult($"Line item {lineItemId} deleted.");
+}
+```
 
 ---
 
