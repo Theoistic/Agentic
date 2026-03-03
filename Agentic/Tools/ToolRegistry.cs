@@ -59,6 +59,12 @@ public sealed class ToolRegistry
     public IEnumerable<IAgentToolSet> ToolSets => _sets;
     /// <summary>Total number of individual tools registered across all tool sets.</summary>
     public int Count => _tools.Count;
+    /// <summary>
+    /// Custom <see cref="JsonSerializerOptions"/> used when deserialising tool call arguments.
+    /// Assign this to add converters for your domain types (e.g. <see cref="System.Text.Json.Serialization.JsonStringEnumConverter"/>).
+    /// <c>null</c> = use the default options.
+    /// </summary>
+    public JsonSerializerOptions? JsonOptions { get; set; }
 
     /// <summary>
     /// Registers all <see cref="ToolAttribute"/>-decorated methods from <paramref name="toolSet"/>.
@@ -107,7 +113,7 @@ public sealed class ToolRegistry
     {
         if (!_tools.TryGetValue(name, out var tool))
             throw new KeyNotFoundException($"Tool '{name}' is not registered.");
-        var args = BindArguments(tool.Parameters, arguments, ct);
+        var args = BindArguments(tool.Parameters, arguments, JsonOptions, ct);
         var result = tool.Method.Invoke(tool.Instance, args);
         if (result is Task task)
         {
@@ -128,7 +134,7 @@ public sealed class ToolRegistry
         public required ParameterInfo[] Parameters { get; init; }
     }
 
-    private static object?[] BindArguments(ParameterInfo[] parameters, JsonElement? arguments, CancellationToken ct = default)
+    private static object?[] BindArguments(ParameterInfo[] parameters, JsonElement? arguments, JsonSerializerOptions? jsonOptions, CancellationToken ct = default)
     {
         var args = new object?[parameters.Length];
         for (int i = 0; i < parameters.Length; i++)
@@ -138,7 +144,7 @@ public sealed class ToolRegistry
             if (p.ParameterType == typeof(JsonElement))        { args[i] = arguments ?? default; continue; }
             if (p.ParameterType == typeof(CancellationToken))  { args[i] = ct; continue; }
             if (arguments.HasValue && arguments.Value.TryGetProperty(p.Name!, out var prop))
-                args[i] = JsonSerializer.Deserialize(prop.GetRawText(), p.ParameterType);
+                args[i] = JsonSerializer.Deserialize(prop.GetRawText(), p.ParameterType, jsonOptions);
             else if (p.HasDefaultValue) args[i] = p.DefaultValue;
             else args[i] = p.ParameterType.IsValueType ? Activator.CreateInstance(p.ParameterType) : null;
         }
@@ -158,23 +164,46 @@ public sealed class ToolRegistry
         {
             var desc = p.GetCustomAttribute<ToolParamAttribute>()?.Description
                     ?? p.GetCustomAttribute<DescriptionAttribute>()?.Description;
-            var s = new Dictionary<string, object> { ["type"] = ClrToJsonType(p.ParameterType) };
-            if (desc is not null) s["description"] = desc;
-            props[p.Name!] = ToolSchema.SerializeToElement(s);
+            props[p.Name!] = BuildTypeSchema(p.ParameterType, desc);
             if (!p.HasDefaultValue) req.Add(p.Name!);
         }
         return ToolSchema.Object(props, req.Count > 0 ? req : null);
     }
 
-    private static string ClrToJsonType(Type t)
+    private static JsonElement BuildTypeSchema(Type t, string? desc = null)
     {
         var u = Nullable.GetUnderlyingType(t) ?? t;
-        if (u == typeof(string))  return "string";
-        if (u == typeof(bool))    return "boolean";
-        if (u == typeof(int) || u == typeof(long) || u == typeof(short)) return "integer";
-        if (u == typeof(float) || u == typeof(double) || u == typeof(decimal)) return "number";
-        if (u.IsArray || (u.IsGenericType && u.GetGenericTypeDefinition() == typeof(List<>))) return "array";
-        return "string";
+        if (u == typeof(string))  return ToolSchema.String(desc);
+        if (u == typeof(bool))    return ToolSchema.Boolean(desc);
+        if (u == typeof(int) || u == typeof(long) || u == typeof(short)) return ToolSchema.Integer(desc);
+        if (u == typeof(float) || u == typeof(double) || u == typeof(decimal)) return ToolSchema.Number(desc);
+
+        if (u.IsArray || (u.IsGenericType && u.GetGenericTypeDefinition() == typeof(List<>)))
+        {
+            var elem = u.IsArray ? u.GetElementType()! : u.GetGenericArguments()[0];
+            return ToolSchema.Array(BuildTypeSchema(elem), desc);
+        }
+
+        if (u.IsClass || (u.IsValueType && !u.IsPrimitive && !u.IsEnum))
+        {
+            var props = new Dictionary<string, JsonElement>();
+            var req = new List<string>();
+            foreach (var prop in u.GetProperties(BindingFlags.Public | BindingFlags.Instance).Where(p => p.CanRead))
+            {
+                var name = prop.GetCustomAttribute<JsonPropertyNameAttribute>()?.Name
+                         ?? (char.ToLowerInvariant(prop.Name[0]) + prop.Name[1..]);
+                var propDesc = prop.GetCustomAttribute<DescriptionAttribute>()?.Description;
+                props[name] = BuildTypeSchema(prop.PropertyType, propDesc);
+                if (prop.PropertyType.IsValueType && Nullable.GetUnderlyingType(prop.PropertyType) is null)
+                    req.Add(name);
+            }
+            var obj = new Dictionary<string, object> { ["type"] = "object", ["properties"] = props };
+            if (req.Count > 0) obj["required"] = req;
+            if (desc is not null) obj["description"] = desc;
+            return ToolSchema.SerializeToElement(obj);
+        }
+
+        return ToolSchema.String(desc);
     }
 
     private static string ToSnakeCase(string name)
