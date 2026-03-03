@@ -173,7 +173,7 @@ public sealed class ToolRegistry
         return ToolSchema.Object(props, req.Count > 0 ? req : null);
     }
 
-    private static JsonElement BuildTypeSchema(Type t, string? desc = null)
+    private static JsonElement BuildTypeSchema(Type t, string? desc = null, HashSet<Type>? visiting = null)
     {
         var u = Nullable.GetUnderlyingType(t) ?? t;
         if (u == typeof(string))  return ToolSchema.String(desc);
@@ -184,26 +184,38 @@ public sealed class ToolRegistry
         if (u.IsArray || (u.IsGenericType && u.GetGenericTypeDefinition() == typeof(List<>)))
         {
             var elem = u.IsArray ? u.GetElementType()! : u.GetGenericArguments()[0];
-            return ToolSchema.Array(BuildTypeSchema(elem), desc);
+            return ToolSchema.Array(BuildTypeSchema(elem, null, visiting), desc);
         }
 
         if (u.IsClass || (u.IsValueType && !u.IsPrimitive && !u.IsEnum))
         {
-            var props = new Dictionary<string, JsonElement>();
-            var req = new List<string>();
-            foreach (var prop in u.GetProperties(BindingFlags.Public | BindingFlags.Instance).Where(p => p.CanRead))
+            visiting ??= [];
+            if (!visiting.Add(u))
+                return ToolSchema.Object([], null);   // circular reference — break the cycle
+
+            try
             {
-                var name = prop.GetCustomAttribute<JsonPropertyNameAttribute>()?.Name
-                         ?? (char.ToLowerInvariant(prop.Name[0]) + prop.Name[1..]);
-                var propDesc = prop.GetCustomAttribute<DescriptionAttribute>()?.Description;
-                props[name] = BuildTypeSchema(prop.PropertyType, propDesc);
-                if (prop.PropertyType.IsValueType && Nullable.GetUnderlyingType(prop.PropertyType) is null)
-                    req.Add(name);
+                var props = new Dictionary<string, JsonElement>();
+                var req = new List<string>();
+                foreach (var prop in u.GetProperties(BindingFlags.Public | BindingFlags.Instance)
+                                      .Where(p => p.CanRead && p.GetCustomAttribute<JsonIgnoreAttribute>() is null))
+                {
+                    var name = prop.GetCustomAttribute<JsonPropertyNameAttribute>()?.Name
+                             ?? (char.ToLowerInvariant(prop.Name[0]) + prop.Name[1..]);
+                    var propDesc = prop.GetCustomAttribute<DescriptionAttribute>()?.Description;
+                    props[name] = BuildTypeSchema(prop.PropertyType, propDesc, visiting);
+                    if (prop.PropertyType.IsValueType && Nullable.GetUnderlyingType(prop.PropertyType) is null)
+                        req.Add(name);
+                }
+                var obj = new Dictionary<string, object> { ["type"] = "object", ["properties"] = props };
+                if (req.Count > 0) obj["required"] = req;
+                if (desc is not null) obj["description"] = desc;
+                return ToolSchema.SerializeToElement(obj);
             }
-            var obj = new Dictionary<string, object> { ["type"] = "object", ["properties"] = props };
-            if (req.Count > 0) obj["required"] = req;
-            if (desc is not null) obj["description"] = desc;
-            return ToolSchema.SerializeToElement(obj);
+            finally
+            {
+                visiting.Remove(u);
+            }
         }
 
         return ToolSchema.String(desc);

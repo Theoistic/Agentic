@@ -2,7 +2,7 @@
 
 A lightweight .NET library for building LLM-powered agents with streaming chat, MCP tool hosting, context compaction, and vector storage — all via a clean, attribute-driven API.
 
-[![NuGet](https://img.shields.io/nuget/v/Agentic.svg)](https://www.nuget.org/packages/Agentic)
+[![NuGet](https://img.shields.io/nuget/v/Theoistic.Agentic.svg)](https://www.nuget.org/packages/Theoistic.Agentic)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 ---

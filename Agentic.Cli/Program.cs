@@ -6,8 +6,8 @@ using Agentic.Mcp;
 Console.OutputEncoding = System.Text.Encoding.UTF8;
 
 // ── Config (override via CLI args: [endpoint] [model]) ────────────────────
-var endpoint = args.Length > 0 ? args[0] : "http://10.1.20.155:1234";
-var model = args.Length > 1 ? args[1] : "Qwen3.5-35B-A3B 64k";
+var endpoint = args.Length > 0 ? args[0] : "http://10.1.20.127:1234";
+var model = args.Length > 1 ? args[1] : "qwen/qwen3.5-9b";
 
 // ── MCP host ──────────────────────────────────────────────────────────────
 var builder = WebApplication.CreateBuilder([]);  // don't forward CLI args to ASP.NET
@@ -78,6 +78,7 @@ agent = new Agent(lm, new AgentOptions
     SystemPrompt = SystemPrompt,
     OnEvent      = HandleEvent,
     Compaction   = new CompactionOptions(),
+    Thinking     = new ThinkingConfig { Enabled = false },
 });
 
 WriteDim($"Context: auto-compact at {agent.Context!.Options.CompactionThreshold:P0} of {agent.Context.Options.MaxContextTokens:#,0} tokens");
