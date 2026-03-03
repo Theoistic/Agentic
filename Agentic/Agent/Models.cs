@@ -59,6 +59,11 @@ public sealed class AgentOptions
     public Action<AgentEvent>? OnEvent { get; set; }
     /// <summary>Enables context compaction. <c>null</c> = compaction disabled.</summary>
     public CompactionOptions? Compaction { get; set; }
+    /// <summary>
+    /// Qwen thinking override for every call made by this agent.
+    /// Overrides <see cref="LMConfig.Thinking"/> when set; <c>null</c> falls back to the LM-level default.
+    /// </summary>
+    public ThinkingConfig? Thinking { get; set; }
 }
 
 /// <summary>Records a single tool call that was executed during an agent turn.</summary>

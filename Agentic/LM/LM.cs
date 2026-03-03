@@ -20,6 +20,12 @@ public class LMConfig
     public string ApiKey { get; set; } = "";
     /// <summary>Model identifier used for embedding requests. Required when calling <see cref="LM.EmbedAsync"/> or <see cref="LM.EmbedBatchAsync"/>.</summary>
     public string? EmbeddingModel { get; set; }
+    /// <summary>
+    /// Default thinking configuration applied to every <c>/v1/responses</c> call.
+    /// Can be overridden per-call or per-agent via <see cref="AgentOptions.Thinking"/>.
+    /// <c>null</c> = omit the flag entirely (server default).
+    /// </summary>
+    public ThinkingConfig? Thinking { get; set; }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -75,18 +81,21 @@ public sealed class LM : IDisposable
     /// <param name="temperature">Sampling temperature.</param>
     /// <param name="tools">Tool definitions (e.g. MCP servers) available to the model.</param>
     /// <param name="reasoning">Optional reasoning configuration.</param>
+    /// <param name="thinking">Qwen thinking override; <c>null</c> falls back to <see cref="LMConfig.Thinking"/>.</param>
     /// <param name="ct">Cancellation token.</param>
     public async Task<ResponseResponse> RespondAsync(
         string input, string? instructions = null, string? previousResponseId = null,
         double temperature = 0, List<ToolDefinition>? tools = null,
-        ReasoningConfig? reasoning = null, CancellationToken ct = default)
+        ReasoningConfig? reasoning = null, ThinkingConfig? thinking = null, CancellationToken ct = default)
     {
-        return await PostAsync<ResponseRequest, ResponseResponse>("/v1/responses", new()
+        var req = new ResponseRequest
         {
             Model = _config.ModelName, Input = input, Instructions = instructions,
             PreviousResponseId = previousResponseId, Temperature = temperature,
             Tools = tools, Reasoning = reasoning,
-        }, ct);
+        };
+        ApplyThinking(req, thinking ?? _config.Thinking);
+        return await PostAsync<ResponseRequest, ResponseResponse>("/v1/responses", req, ct);
     }
 
     /// <summary>Sends a multi-turn conversation history to <c>/v1/responses</c> and returns the full response.</summary>
@@ -96,25 +105,36 @@ public sealed class LM : IDisposable
     /// <param name="temperature">Sampling temperature.</param>
     /// <param name="tools">Tool definitions available to the model.</param>
     /// <param name="reasoning">Optional reasoning configuration.</param>
+    /// <param name="thinking">Qwen thinking override; <c>null</c> falls back to <see cref="LMConfig.Thinking"/>.</param>
     /// <param name="ct">Cancellation token.</param>
     public async Task<ResponseResponse> RespondAsync(
         IEnumerable<ResponseInput> input, string? instructions = null, string? previousResponseId = null,
         double temperature = 0, List<ToolDefinition>? tools = null,
-        ReasoningConfig? reasoning = null, CancellationToken ct = default)
+        ReasoningConfig? reasoning = null, ThinkingConfig? thinking = null, CancellationToken ct = default)
     {
-        return await PostAsync<ResponseRequest, ResponseResponse>("/v1/responses", new()
+        var req = new ResponseRequest
         {
             Model = _config.ModelName, Input = input.ToList(), Instructions = instructions,
             PreviousResponseId = previousResponseId, Temperature = temperature,
             Tools = tools, Reasoning = reasoning,
-        }, ct);
+        };
+        ApplyThinking(req, thinking ?? _config.Thinking);
+        return await PostAsync<ResponseRequest, ResponseResponse>("/v1/responses", req, ct);
     }
 
     /// <summary>Streaming /v1/responses — yields SSE events as they arrive.</summary>
+    /// <param name="input">User message text.</param>
+    /// <param name="instructions">Optional system/instruction text.</param>
+    /// <param name="previousResponseId">ID of the previous response for multi-turn chaining.</param>
+    /// <param name="temperature">Sampling temperature.</param>
+    /// <param name="tools">Tool definitions available to the model.</param>
+    /// <param name="reasoning">Optional reasoning configuration.</param>
+    /// <param name="thinking">Qwen thinking override; <c>null</c> falls back to <see cref="LMConfig.Thinking"/>.</param>
+    /// <param name="ct">Cancellation token.</param>
     public async IAsyncEnumerable<StreamEvent> RespondStreamingAsync(
         string input, string? instructions = null, string? previousResponseId = null,
         double temperature = 0, List<ToolDefinition>? tools = null,
-        ReasoningConfig? reasoning = null,
+        ReasoningConfig? reasoning = null, ThinkingConfig? thinking = null,
         [EnumeratorCancellation] CancellationToken ct = default)
     {
         var request = new ResponseRequest
@@ -123,15 +143,23 @@ public sealed class LM : IDisposable
             PreviousResponseId = previousResponseId, Temperature = temperature,
             Tools = tools, Reasoning = reasoning, Stream = true,
         };
+        ApplyThinking(request, thinking ?? _config.Thinking);
 
         await foreach (var ev in StreamRequestAsync(request, ct)) yield return ev;
     }
 
     /// <summary>Streaming /v1/responses with a full conversation history as input.</summary>
+    /// <param name="input">Ordered list of conversation turns to replay.</param>
+    /// <param name="instructions">Optional system/instruction text.</param>
+    /// <param name="temperature">Sampling temperature.</param>
+    /// <param name="tools">Tool definitions available to the model.</param>
+    /// <param name="reasoning">Optional reasoning configuration.</param>
+    /// <param name="thinking">Qwen thinking override; <c>null</c> falls back to <see cref="LMConfig.Thinking"/>.</param>
+    /// <param name="ct">Cancellation token.</param>
     public async IAsyncEnumerable<StreamEvent> RespondStreamingAsync(
         IEnumerable<ResponseInput> input, string? instructions = null,
         double temperature = 0, List<ToolDefinition>? tools = null,
-        ReasoningConfig? reasoning = null,
+        ReasoningConfig? reasoning = null, ThinkingConfig? thinking = null,
         [EnumeratorCancellation] CancellationToken ct = default)
     {
         var request = new ResponseRequest
@@ -139,6 +167,7 @@ public sealed class LM : IDisposable
             Model = _config.ModelName, Input = input.ToList(), Instructions = instructions,
             Temperature = temperature, Tools = tools, Reasoning = reasoning, Stream = true,
         };
+        ApplyThinking(request, thinking ?? _config.Thinking);
 
         await foreach (var ev in StreamRequestAsync(request, ct)) yield return ev;
     }
@@ -285,6 +314,12 @@ public sealed class LM : IDisposable
             return r.IsSuccessStatusCode;
         }
         catch { return false; }
+    }
+
+    private static void ApplyThinking(ResponseRequest request, ThinkingConfig? thinking)
+    {
+        if (thinking is null) return;
+        request.EnableThinking = thinking.Enabled;
     }
 
     public void Dispose() { if (_ownsClient) _http.Dispose(); }

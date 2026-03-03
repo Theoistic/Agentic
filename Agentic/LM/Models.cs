@@ -48,6 +48,9 @@ public sealed class ResponseRequest
     public List<ToolDefinition>? Tools { get; set; }
     [JsonPropertyName("reasoning"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public ReasoningConfig? Reasoning { get; set; }
+    /// <summary>Qwen thinking toggle: sent as <c>enable_thinking</c> in the request body.</summary>
+    [JsonPropertyName("enable_thinking"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? EnableThinking { get; set; }
     [JsonPropertyName("stream"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public bool Stream { get; set; }
 }
@@ -57,6 +60,13 @@ public sealed class ReasoningConfig
 {
     /// <summary>Effort level: <c>"low"</c>, <c>"medium"</c> (default), or <c>"high"</c>.</summary>
     [JsonPropertyName("effort")] public string Effort { get; set; } = "medium";
+}
+
+/// <summary>Controls Qwen-style chain-of-thought thinking for a single request or globally via <see cref="LMConfig"/>.</summary>
+public sealed class ThinkingConfig
+{
+    /// <summary>Whether to enable (<c>true</c>) or disable (<c>false</c>) thinking.</summary>
+    public bool Enabled { get; set; } = true;
 }
 
 /// <summary>A typed content block within a <see cref="ResponseOutputItem"/> (e.g. <c>output_text</c>).</summary>
