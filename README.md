@@ -187,6 +187,58 @@ foreach (var r in results)
 | `Temperature` | `0` | Sampling temperature |
 | `OnEvent` | `null` | Callback fired for every `AgentEvent` |
 | `Compaction` | `null` | Enable context compaction (see above) |
+| `Thinking` | `null` | Per-agent thinking default (see [Thinking Control](#thinking-control)) |
+
+---
+
+## Thinking Control
+
+For models that support chain-of-thought reasoning (e.g. Qwen3), you can toggle thinking on or off at three levels. Each level overrides the one above it.
+
+### 1 — Global default (LMConfig)
+
+Applies to every request made through this `LM` instance unless overridden.
+
+```csharp
+var lm = new LM(new LMConfig
+{
+    Endpoint  = "http://localhost:1234",
+    ModelName = "Qwen/Qwen3-30B-A3B",
+    Thinking  = new ThinkingConfig { Enabled = false },  // thinking off by default
+});
+```
+
+### 2 — Per-agent default (AgentOptions)
+
+Overrides the global `LMConfig.Thinking` for this agent only.
+
+```csharp
+var agent = new Agent(lm, new AgentOptions
+{
+    SystemPrompt = "You are a helpful assistant.",
+    Thinking     = new ThinkingConfig { Enabled = true },  // override: thinking on for this agent
+});
+```
+
+### 3 — Per-request override
+
+Pass `thinking:` directly to any `Run*` / `Chat*` call. This takes precedence over both the agent and global defaults.
+
+```csharp
+// Thinking explicitly off for this one call
+var response = await agent.ChatStreamAsync(
+    "Quick question — what is 2 + 2?",
+    mcpServerUrl: "http://localhost:5100/mcp",
+    thinking: new ThinkingConfig { Enabled = false });
+
+// Thinking explicitly on for this one call
+var response = await agent.ChatStreamAsync(
+    "Analyse the trade-offs of this architecture design.",
+    mcpServerUrl: "http://localhost:5100/mcp",
+    thinking: new ThinkingConfig { Enabled = true });
+```
+
+> **Precedence:** per-request → per-agent (`AgentOptions.Thinking`) → global (`LMConfig.Thinking`) → not sent (model default).
 
 ---
 
