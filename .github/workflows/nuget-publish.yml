@@ -1,0 +1,77 @@
+name: Build and Publish to NuGet
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Auto-increment patch version
+        id: version
+        run: |
+          CSPROJ="Agentic/Agentic.csproj"
+          CURRENT_VERSION=$(grep -oP '(?<=<Version>)[^<]+' "$CSPROJ")
+
+          if [[ -z "$CURRENT_VERSION" ]]; then
+            echo "ERROR: Could not read <Version> from $CSPROJ" >&2
+            exit 1
+          fi
+          echo "Current version: $CURRENT_VERSION"
+
+          if ! [[ "$CURRENT_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "ERROR: Version '$CURRENT_VERSION' is not in MAJOR.MINOR.PATCH format" >&2
+            exit 1
+          fi
+
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT_VERSION"
+          NEW_PATCH=$((PATCH + 1))
+          NEW_VERSION="${MAJOR}.${MINOR}.${NEW_PATCH}"
+          echo "New version: $NEW_VERSION"
+
+          sed -i "s|<Version>${CURRENT_VERSION}</Version>|<Version>${NEW_VERSION}</Version>|" "$CSPROJ"
+          echo "new_version=${NEW_VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Restore dependencies
+        run: dotnet restore Agentic/Agentic.csproj
+
+      - name: Build
+        run: dotnet build Agentic/Agentic.csproj --no-restore --configuration Release
+
+      - name: Pack
+        run: dotnet pack Agentic/Agentic.csproj --no-build --configuration Release --output ./nupkg
+
+      - name: Publish to NuGet
+        run: |
+          dotnet nuget push ./nupkg/*.nupkg \
+            --api-key ${{ secrets.NUGET_API_KEY }} \
+            --source https://api.nuget.org/v3/index.json \
+            --skip-duplicate
+
+      - name: Commit version bump
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add Agentic/Agentic.csproj
+          if git diff --cached --quiet; then
+            echo "No version changes to commit."
+          else
+            git commit -m "chore: bump version to ${{ steps.version.outputs.new_version }} [skip ci]"
+            git push
+          fi
