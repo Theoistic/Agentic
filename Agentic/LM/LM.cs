@@ -242,30 +242,6 @@ public sealed class LM : IDisposable
         }
     }
 
-    /// <summary>
-    /// Sends a one-shot vision request to <c>/v1/responses</c> with thinking disabled and returns the text output.
-    /// Accepts HTTP(S) URLs and <c>data:image/…;base64,…</c> data URLs.
-    /// </summary>
-    public Task<string> DescribeImageAsync(string prompt, string imageUrl, CancellationToken ct = default)
-        => DescribeImageAsync(prompt, [imageUrl], ct);
-
-    /// <summary>
-    /// Sends a one-shot vision request to <c>/v1/responses</c> with thinking disabled and returns the text output.
-    /// Pass multiple image URLs or <c>data:image/…;base64,…</c> data URLs in <paramref name="imageUrls"/>.
-    /// </summary>
-    public async Task<string> DescribeImageAsync(string prompt, IEnumerable<string> imageUrls, CancellationToken ct = default)
-    {
-        var resp = await RespondAsync(
-            [ResponseInput.User(prompt, imageUrls)],
-            thinking: new ThinkingConfig { Enabled = false },
-            ct: ct);
-        return resp.Output
-            .SelectMany(item => item.Content ?? [])
-            .Where(c => c.Type == "output_text")
-            .Select(c => c.Text ?? "")
-            .FirstOrDefault() ?? "";
-    }
-
     // ── Embeddings ───────────────────────────────────────────────────────
 
     /// <summary>Generate an embedding vector for a single text input.</summary>

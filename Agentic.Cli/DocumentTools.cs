@@ -106,7 +106,14 @@ public class DocumentTools(LM lm, string documentsFolder) : IAgentToolSet
                 var rawBytes = pageReader.GetImage();
 
                 var dataUri  = BgraToJpegDataUri(rawBytes, width, height);
-                var analysis = await lm.DescribeImageAsync(prompt, dataUri);
+                var resp     = await lm.RespondAsync(
+                    [ResponseInput.User(prompt, [dataUri])],
+                    thinking: new ThinkingConfig { Enabled = false });
+                var analysis = resp.Output
+                    .SelectMany(item => item.Content ?? [])
+                    .Where(c => c.Type == "output_text")
+                    .Select(c => c.Text ?? "")
+                    .FirstOrDefault() ?? "";
 
                 sb.AppendLine();
                 sb.AppendLine($"── Page {i + 1} / {pageCount}  ({width}×{height} px) ──");
