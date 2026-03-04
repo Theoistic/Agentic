@@ -504,29 +504,6 @@ Register with:
 toolRegistry.Register(new EmbeddingTools(lm));
 ```
 
-### `ImageTools` *(Agentic.Cli)*
-
-Allows the agent to autonomously fetch and analyse images during a reasoning loop. Both tools call `/v1/responses` with an `input_image` content item and return the model's textual description.
-
-| Tool | Input | Description |
-|------|-------|-------------|
-| `analyse_image` | URL or base64 data URL | Downloads the image locally (bypassing LM-side SSRF checks) and sends it to the vision model |
-| `analyse_local_image` | Absolute path or filename under `wwwroot/images/` | Reads the file from disk, base64-encodes it, and sends it to the vision model |
-
-Register with:
-
-```csharp
-toolRegistry.Register(new ImageTools(lm));
-```
-
-Example agent interaction:
-
-```
-You › analyse the diagram at http://10.0.0.5/images/schema.png
-  ⚙  analyse_image  imageUrl=http://10.0.0.5/images/schema.png  prompt=Describe this image in detail.
-  ↳  The diagram shows a three-tier architecture with …
-```
-
 ---
 
 ## License
