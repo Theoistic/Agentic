@@ -181,6 +181,15 @@ public sealed class ToolRegistry
         if (u == typeof(int) || u == typeof(long) || u == typeof(short)) return ToolSchema.Integer(desc);
         if (u == typeof(float) || u == typeof(double) || u == typeof(decimal)) return ToolSchema.Number(desc);
 
+        if (u.IsEnum) return ToolSchema.Enum(System.Enum.GetNames(u), desc);
+
+        if (u == typeof(DateTime) || u == typeof(DateTimeOffset)) return ToolSchema.StringFormat("date-time", desc);
+        if (u == typeof(DateOnly))   return ToolSchema.StringFormat("date", desc);
+        if (u == typeof(TimeOnly))   return ToolSchema.StringFormat("time", desc);
+        if (u == typeof(TimeSpan))   return ToolSchema.String(desc);
+        if (u == typeof(Guid))       return ToolSchema.StringFormat("uuid", desc);
+        if (u == typeof(Uri))        return ToolSchema.StringFormat("uri", desc);
+
         if (u.IsArray || (u.IsGenericType && u.GetGenericTypeDefinition() == typeof(List<>)))
         {
             var elem = u.IsArray ? u.GetElementType()! : u.GetGenericArguments()[0];
@@ -269,6 +278,10 @@ public static class ToolSchema
     /// <summary>Creates a <c>string</c> JSON Schema property restricted to the given enum values.</summary>
     public static JsonElement Enum(IEnumerable<string> values, string? desc = null)
     { var o = new Dictionary<string, object> { ["type"] = "string", ["enum"] = values.ToList() }; if (desc is not null) o["description"] = desc; return SerializeToElement(o); }
+
+    /// <summary>Creates a <c>string</c> JSON Schema property with a <c>format</c> hint (e.g. <c>date-time</c>, <c>uuid</c>, <c>uri</c>).</summary>
+    public static JsonElement StringFormat(string format, string? desc = null)
+    { var o = new Dictionary<string, object> { ["type"] = "string", ["format"] = format }; if (desc is not null) o["description"] = desc; return SerializeToElement(o); }
 
     private static JsonElement Prop(string type, string? desc)
     { var o = new Dictionary<string, object> { ["type"] = type }; if (desc is not null) o["description"] = desc; return SerializeToElement(o); }
