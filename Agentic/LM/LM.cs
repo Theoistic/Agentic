@@ -151,6 +151,7 @@ public sealed class LM : IDisposable
     /// <summary>Streaming /v1/responses with a full conversation history as input.</summary>
     /// <param name="input">Ordered list of conversation turns to replay.</param>
     /// <param name="instructions">Optional system/instruction text.</param>
+    /// <param name="previousResponseId">ID of the previous response for multi-turn chaining.</param>
     /// <param name="temperature">Sampling temperature.</param>
     /// <param name="tools">Tool definitions available to the model.</param>
     /// <param name="reasoning">Optional reasoning configuration.</param>
@@ -158,6 +159,7 @@ public sealed class LM : IDisposable
     /// <param name="ct">Cancellation token.</param>
     public async IAsyncEnumerable<StreamEvent> RespondStreamingAsync(
         IEnumerable<ResponseInput> input, string? instructions = null,
+        string? previousResponseId = null,
         double temperature = 0, List<ToolDefinition>? tools = null,
         ReasoningConfig? reasoning = null, ThinkingConfig? thinking = null,
         [EnumeratorCancellation] CancellationToken ct = default)
@@ -165,6 +167,7 @@ public sealed class LM : IDisposable
         var request = new ResponseRequest
         {
             Model = _config.ModelName, Input = input.ToList(), Instructions = instructions,
+            PreviousResponseId = previousResponseId,
             Temperature = temperature, Tools = tools, Reasoning = reasoning, Stream = true,
         };
         ApplyThinking(request, thinking ?? _config.Thinking);

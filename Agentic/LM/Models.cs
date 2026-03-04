@@ -128,13 +128,87 @@ public sealed class StreamEvent
     [JsonPropertyName("response")]      public ResponseResponse? Response { get; set; }
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+//  Multimodal input content parts (/v1/responses input_image support)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// <summary>
+/// Discriminated content part for a multimodal <c>/v1/responses</c> input message.
+/// Concrete types: <see cref="InputTextContent"/> and <see cref="InputImageContent"/>.
+/// </summary>
+[JsonPolymorphic(TypeDiscriminatorPropertyName = "type")]
+[JsonDerivedType(typeof(InputTextContent),  "input_text")]
+[JsonDerivedType(typeof(InputImageContent), "input_image")]
+public abstract class ResponseInputContent { }
+
+/// <summary>Text content part for a multimodal input message.</summary>
+public sealed class InputTextContent(string text) : ResponseInputContent
+{
+    /// <summary>The text value of this content part.</summary>
+    [JsonPropertyName("text")] public string Text { get; set; } = text;
+}
+
+/// <summary>
+/// Image content part for a multimodal input message.
+/// Supply a URL or a <c>data:image/…;base64,…</c> data URL via <see cref="ImageUrl"/>.
+/// </summary>
+public sealed class InputImageContent : ResponseInputContent
+{
+    /// <summary>A URL or base64 data URL (<c>data:image/jpeg;base64,…</c>).</summary>
+    [JsonPropertyName("image_url"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ImageUrl { get; set; }
+
+    /// <summary>Creates an image part from a URL or base64 data URL.</summary>
+    public static InputImageContent FromUrl(string url) => new() { ImageUrl = url };
+
+    /// <summary>
+    /// Reads a local file and encodes it as a base64 data URL.
+    /// <paramref name="mimeType"/> is inferred from the file extension when not supplied.
+    /// </summary>
+    public static InputImageContent FromFile(string filePath, string? mimeType = null)
+    {
+        var bytes = File.ReadAllBytes(filePath);
+        var b64   = Convert.ToBase64String(bytes);
+        mimeType ??= InferMimeType(filePath);
+        return new() { ImageUrl = $"data:{mimeType};base64,{b64}" };
+    }
+
+    private static string InferMimeType(string path) => Path.GetExtension(path).ToLowerInvariant() switch
+    {
+        ".jpg" or ".jpeg" => "image/jpeg",
+        ".png"            => "image/png",
+        ".gif"            => "image/gif",
+        ".webp"           => "image/webp",
+        _                 => "image/jpeg",
+    };
+}
+
 /// <summary>A single conversation turn used as input to <c>/v1/responses</c>.</summary>
 public sealed class ResponseInput
 {
     /// <summary>The speaker role: <c>"user"</c> or <c>"assistant"</c>.</summary>
     [JsonPropertyName("role")]    public string Role { get; set; } = "user";
-    /// <summary>The text content of this conversation turn.</summary>
-    [JsonPropertyName("content")] public string Content { get; set; } = "";
+
+    /// <summary>
+    /// The content of this turn. Either a plain <see cref="string"/> for text-only messages,
+    /// or a <see cref="List{T}"/> of <see cref="ResponseInputContent"/> for multimodal messages.
+    /// </summary>
+    [JsonPropertyName("content")] public object Content { get; set; } = "";
+
+    /// <summary>Builds a text-only user input.</summary>
+    public static ResponseInput User(string text) => new() { Role = "user", Content = text };
+
+    /// <summary>
+    /// Builds a multimodal user input with text and images.
+    /// Each image string may be a URL or a <c>data:image/…;base64,…</c> data URL.
+    /// </summary>
+    public static ResponseInput User(string text, IEnumerable<string> images)
+    {
+        var parts = new List<ResponseInputContent> { new InputTextContent(text) };
+        foreach (var img in images)
+            parts.Add(InputImageContent.FromUrl(img));
+        return new() { Role = "user", Content = parts };
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

@@ -26,6 +26,7 @@ using var lm = new LM(new LMConfig
 });
 
 var app = builder.Build();
+app.UseStaticFiles();
 app.MapMcpServer("/mcp");
 
 var toolRegistry  = app.Services.GetRequiredService<ToolRegistry>();
@@ -35,6 +36,7 @@ var docsFolder    = @"C:\Users\Theo\Downloads\zikksamples\zikksamples";
 toolRegistry.Register(new EmbeddingTools(lm));
 toolRegistry.Register(new DocumentTools(lm, docsFolder));
 toolRegistry.Register(new HsCodeTools(lm, store.Collection<HSDescription>("hscodes")));
+toolRegistry.Register(new ImageTools(lm));
 
 await app.StartAsync();
 var mcpUrl = app.GetMcpUrl();
@@ -49,7 +51,10 @@ var docFiles = Directory.Exists(docsFolder)
     ? Directory.GetFiles(docsFolder, "*.pdf", SearchOption.AllDirectories)
     : [];
 WriteDim($"Docs:  {(docFiles.Length == 0 ? "(none)" : string.Join(", ", docFiles.Select(Path.GetFileName)))}");
-WriteDim("Commands: exit | quit | /reset | /compact [light|standard|detailed]");
+var wwwroot    = app.Environment.WebRootPath ?? Path.Combine(app.Environment.ContentRootPath, "wwwroot");
+var staticBase = app.Urls.FirstOrDefault() ?? "http://10.1.20.127:5100";
+WriteDim($"Static: {staticBase}/  →  {wwwroot}");
+WriteDim("Commands: exit | quit | /reset | /compact [light|standard|detailed] | /img <url-or-path> [prompt]");
 
 // ── LM health check ───────────────────────────────────────────────────────
 Console.Write("  LM server  ");
@@ -114,6 +119,26 @@ while (true)
                 WriteDim($"[compacted: {cp.Level} · #{cp.CompactionCount} · {cp.Objective[..Math.Min(80, cp.Objective.Length)]}]");
         }
         catch (Exception ex) { Write(ConsoleColor.Red, $"  compact failed: {ex.Message}\n"); }
+        continue;
+    }
+
+    if (input.StartsWith("/img "))
+    {
+        // /img <url-or-path> [prompt text]
+        var rest   = input["/img ".Length..].Trim();
+        var sep    = rest.IndexOf(' ');
+        var target = sep < 0 ? rest : rest[..sep];
+        var prompt = sep < 0 ? "Describe this image in detail." : rest[(sep + 1)..].Trim();
+
+        Console.WriteLine();
+        try
+        {
+            var dataUrl = File.Exists(target)
+                ? InputImageContent.FromFile(target).ImageUrl!
+                : await ImageTools.ToDataUrlAsync(target);
+            await agent.ChatStreamAsync(prompt, [dataUrl], mcpUrl);
+        }
+        catch (Exception ex) { Write(ConsoleColor.Red, $"[img error] {ex.Message}\n"); }
         continue;
     }
 

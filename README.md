@@ -11,6 +11,7 @@ A lightweight .NET library for building LLM-powered agents with streaming chat, 
 
 - **LM client** — OpenAI-compatible REST client (`/v1/responses`) with streaming, embeddings, vision and health-check
 - **Agent** — multi-turn streaming agent with automatic MCP tool orchestration
+- **Image input** — send images alongside text in any agent turn as a URL, local file, or base64 data URL; models receive a proper `input_image` content item
 - **Workflows** — ordered multi-step execution with per-step async guardrails and automatic retry
 - **Tool system** — define tools with `[Tool]` / `[ToolParam]` attributes; zero boilerplate
 - **Tool context** — HTTP headers from MCP requests are automatically forwarded to tool methods via `ToolContext`
@@ -244,6 +245,65 @@ var response = await agent.ChatStreamAsync(
 
 ---
 
+## Image Input (Vision)
+
+Agentic sends images to the model as `input_image` content items in the `/v1/responses` request body — not as raw base64 text. Every image overload on `Agent` participates in the conversation chain (`previousResponseId`) just like a text turn.
+
+### Building image content parts
+
+```csharp
+// From a public or private URL (downloaded locally to avoid SSRF blocks)
+var img = InputImageContent.FromUrl("https://example.com/photo.jpg");
+
+// From a local file — reads and base64-encodes automatically
+var img = InputImageContent.FromFile(@"C:\images\diagram.png");
+
+// From a base64 data URL you already have
+var img = InputImageContent.FromUrl("data:image/png;base64,iVBOR...");
+```
+
+MIME type is inferred from the file extension (`.jpg`, `.png`, `.gif`, `.webp`); everything else defaults to `image/jpeg`.
+
+### Building a multimodal `ResponseInput`
+
+```csharp
+// Single image + text in one user turn
+var turn = ResponseInput.User("What does this diagram show?", [imageDataUrl]);
+
+// Multiple images
+var turn = ResponseInput.User("Compare these two layouts.", [urlA, urlB]);
+```
+
+`ResponseInput.User(text, images)` wraps the text as an `input_text` part and each image string as an `input_image` part.
+
+### Attaching images to an agent turn
+
+All four `Agent` chat methods have an image overload. The image is part of the current conversation thread — `previousResponseId` chaining and context compaction work normally.
+
+```csharp
+// Multi-turn streaming (most common)
+await agent.ChatStreamAsync(
+    "What is wrong with this schematic?",
+    images:       ["https://host/circuit.png"],
+    mcpServerUrl: "http://localhost:5100/mcp");
+
+// Multi-turn non-streaming
+var response = await agent.ChatAsync(
+    "Summarise the chart.",
+    images:       [InputImageContent.FromFile("chart.png").ImageUrl!],
+    mcpServerUrl: "http://localhost:5100/mcp");
+
+// Single-shot (no history kept)
+var response = await agent.RunStreamAsync(
+    "OCR this receipt.",
+    images:       [dataUrl],
+    mcpServerUrl: "http://localhost:5100/mcp");
+```
+
+> **Private / internal URLs:** If your image is hosted on a private IP the LM server cannot reach (SSRF block), download the bytes yourself first and pass a `data:image/…;base64,…` data URL instead. `InputImageContent.FromFile` and `ImageTools.ToDataUrlAsync` both do this automatically.
+
+---
+
 ## Workflows
 
 A `Workflow` is an ordered sequence of named steps that the agent executes in turn. Each step carries an instruction for the model and an optional **verification callback** — a guardrail that must return `true` before the agent advances to the next step. If a step's guard fails, the agent is prompted to continue with the remaining steps until every guard passes or `maxRounds` is exhausted.
@@ -442,6 +502,29 @@ Register with:
 
 ```csharp
 toolRegistry.Register(new EmbeddingTools(lm));
+```
+
+### `ImageTools` *(Agentic.Cli)*
+
+Allows the agent to autonomously fetch and analyse images during a reasoning loop. Both tools call `/v1/responses` with an `input_image` content item and return the model's textual description.
+
+| Tool | Input | Description |
+|------|-------|-------------|
+| `analyse_image` | URL or base64 data URL | Downloads the image locally (bypassing LM-side SSRF checks) and sends it to the vision model |
+| `analyse_local_image` | Absolute path or filename under `wwwroot/images/` | Reads the file from disk, base64-encodes it, and sends it to the vision model |
+
+Register with:
+
+```csharp
+toolRegistry.Register(new ImageTools(lm));
+```
+
+Example agent interaction:
+
+```
+You › analyse the diagram at http://10.0.0.5/images/schema.png
+  ⚙  analyse_image  imageUrl=http://10.0.0.5/images/schema.png  prompt=Describe this image in detail.
+  ↳  The diagram shows a three-tier architecture with …
 ```
 
 ---

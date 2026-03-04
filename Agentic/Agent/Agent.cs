@@ -82,6 +82,28 @@ public sealed class Agent : IAsyncDisposable
         return ParseOutput(resp);
     }
 
+    /// <summary>Single-shot /v1/responses with text and images. Does not maintain conversation history.</summary>
+    /// <param name="text">The user message text.</param>
+    /// <param name="images">Image URLs or base64 data URLs.</param>
+    /// <param name="mcpServerUrl">URL of the MCP server that supplies tools.</param>
+    /// <param name="serverLabel">Optional label for the MCP server; defaults to <c>"agentic"</c>.</param>
+    /// <param name="allowedTools">Optional allow-list of tool names; <c>null</c> means all tools.</param>
+    /// <param name="mcpHeaders">Optional HTTP headers forwarded to the MCP server.</param>
+    /// <param name="thinking">Per-call thinking override. Overrides <see cref="AgentOptions.Thinking"/> when set.</param>
+    /// <param name="ct">Cancellation token.</param>
+    public async Task<AgentResponse> RunAsync(
+        string text, IEnumerable<string> images, string mcpServerUrl, string? serverLabel = null,
+        List<string>? allowedTools = null, Dictionary<string, string>? mcpHeaders = null,
+        ThinkingConfig? thinking = null, CancellationToken ct = default)
+    {
+        Emit(AgentEventKind.UserInput, text: text);
+        var resp = await _lm.RespondAsync([ResponseInput.User(text, images)],
+            instructions: Options.SystemPrompt, temperature: Options.Temperature,
+            tools: [ToolDefinition.Mcp(serverLabel ?? "agentic", mcpServerUrl, allowedTools, mcpHeaders)],
+            thinking: thinking ?? Options.Thinking, ct: ct);
+        return ParseOutput(resp);
+    }
+
     /// <summary>Multi-turn /v1/responses with <c>previous_response_id</c> chaining. Maintains conversation history across calls.</summary>
     /// <param name="input">The user message for this turn.</param>
     /// <param name="mcpServerUrl">URL of the MCP server that supplies tools.</param>
@@ -123,6 +145,49 @@ public sealed class Agent : IAsyncDisposable
         return result;
     }
 
+    /// <summary>Multi-turn /v1/responses with text and images. Maintains conversation history across calls.</summary>
+    /// <param name="text">The user message text.</param>
+    /// <param name="images">Image URLs or base64 data URLs.</param>
+    /// <param name="mcpServerUrl">URL of the MCP server that supplies tools.</param>
+    /// <param name="serverLabel">Optional label for the MCP server; defaults to <c>"agentic"</c>.</param>
+    /// <param name="allowedTools">Optional allow-list of tool names; <c>null</c> means all tools.</param>
+    /// <param name="mcpHeaders">Optional HTTP headers forwarded to the MCP server.</param>
+    /// <param name="thinking">Per-call thinking override. Overrides <see cref="AgentOptions.Thinking"/> when set.</param>
+    /// <param name="ct">Cancellation token.</param>
+    public async Task<AgentResponse> ChatAsync(
+        string text, IEnumerable<string> images, string mcpServerUrl, string? serverLabel = null,
+        List<string>? allowedTools = null, Dictionary<string, string>? mcpHeaders = null,
+        ThinkingConfig? thinking = null, CancellationToken ct = default)
+    {
+        Emit(AgentEventKind.UserInput, text: text);
+        if (Context?.ShouldCompact == true) await CompactAsync(ct: ct);
+
+        var instructions   = Context?.GetEffectiveSystemPrompt(Options.SystemPrompt) ?? Options.SystemPrompt;
+        var tools          = new List<ToolDefinition> { ToolDefinition.Mcp(serverLabel ?? "agentic", mcpServerUrl, allowedTools, mcpHeaders) };
+        var effectiveThinking = thinking ?? Options.Thinking;
+        var userInput      = ResponseInput.User(text, images);
+
+        ResponseResponse resp;
+        if (Context is not null && _lastResponseId is null && Context.IsCheckpointed)
+        {
+            var inputs = Context.GetHotTailAsInput();
+            inputs.Add(userInput);
+            resp = await _lm.RespondAsync(inputs, instructions: instructions,
+                temperature: Options.Temperature, tools: tools, thinking: effectiveThinking, ct: ct);
+        }
+        else
+        {
+            resp = await _lm.RespondAsync([userInput], instructions: instructions,
+                previousResponseId: _lastResponseId, temperature: Options.Temperature,
+                tools: tools, thinking: effectiveThinking, ct: ct);
+        }
+
+        _lastResponseId = resp.ResponseId;
+        var result = ParseOutput(resp);
+        RecordResponse(text, result);
+        return result;
+    }
+
     /// <summary>Single-shot streaming /v1/responses with real-time events. Does not maintain conversation history.</summary>
     /// <param name="input">The user message to send.</param>
     /// <param name="mcpServerUrl">URL of the MCP server that supplies tools.</param>
@@ -138,6 +203,27 @@ public sealed class Agent : IAsyncDisposable
     {
         Emit(AgentEventKind.UserInput, text: input);
         return await ConsumeStreamAsync(_lm.RespondStreamingAsync(input,
+            instructions: Options.SystemPrompt, temperature: Options.Temperature,
+            tools: [ToolDefinition.Mcp(serverLabel ?? "agentic", mcpServerUrl, allowedTools, mcpHeaders)],
+            thinking: thinking ?? Options.Thinking, ct: ct));
+    }
+
+    /// <summary>Single-shot streaming /v1/responses with text and images, with real-time events. Does not maintain conversation history.</summary>
+    /// <param name="text">The user message text.</param>
+    /// <param name="images">Image URLs or base64 data URLs.</param>
+    /// <param name="mcpServerUrl">URL of the MCP server that supplies tools.</param>
+    /// <param name="serverLabel">Optional label for the MCP server; defaults to <c>"agentic"</c>.</param>
+    /// <param name="allowedTools">Optional allow-list of tool names; <c>null</c> means all tools.</param>
+    /// <param name="mcpHeaders">Optional HTTP headers forwarded to the MCP server.</param>
+    /// <param name="thinking">Per-call thinking override. Overrides <see cref="AgentOptions.Thinking"/> when set.</param>
+    /// <param name="ct">Cancellation token.</param>
+    public async Task<AgentResponse> RunStreamAsync(
+        string text, IEnumerable<string> images, string mcpServerUrl, string? serverLabel = null,
+        List<string>? allowedTools = null, Dictionary<string, string>? mcpHeaders = null,
+        ThinkingConfig? thinking = null, CancellationToken ct = default)
+    {
+        Emit(AgentEventKind.UserInput, text: text);
+        return await ConsumeStreamAsync(_lm.RespondStreamingAsync([ResponseInput.User(text, images)],
             instructions: Options.SystemPrompt, temperature: Options.Temperature,
             tools: [ToolDefinition.Mcp(serverLabel ?? "agentic", mcpServerUrl, allowedTools, mcpHeaders)],
             thinking: thinking ?? Options.Thinking, ct: ct));
@@ -180,6 +266,48 @@ public sealed class Agent : IAsyncDisposable
         }
 
         RecordResponse(input, response);
+        return response;
+    }
+
+    /// <summary>Multi-turn streaming /v1/responses with text and images, with real-time events.</summary>
+    /// <param name="text">The user message text.</param>
+    /// <param name="images">Image URLs or base64 data URLs.</param>
+    /// <param name="mcpServerUrl">URL of the MCP server that supplies tools.</param>
+    /// <param name="serverLabel">Optional label for the MCP server; defaults to <c>"agentic"</c>.</param>
+    /// <param name="allowedTools">Optional allow-list of tool names; <c>null</c> means all tools.</param>
+    /// <param name="mcpHeaders">Optional HTTP headers forwarded to the MCP server.</param>
+    /// <param name="thinking">Per-call thinking override. Overrides <see cref="AgentOptions.Thinking"/> when set.</param>
+    /// <param name="ct">Cancellation token.</param>
+    public async Task<AgentResponse> ChatStreamAsync(
+        string text, IEnumerable<string> images, string mcpServerUrl, string? serverLabel = null,
+        List<string>? allowedTools = null, Dictionary<string, string>? mcpHeaders = null,
+        ThinkingConfig? thinking = null, CancellationToken ct = default)
+    {
+        Emit(AgentEventKind.UserInput, text: text);
+        if (Context?.ShouldCompact == true) await CompactAsync(ct: ct);
+
+        var instructions      = Context?.GetEffectiveSystemPrompt(Options.SystemPrompt) ?? Options.SystemPrompt;
+        var tools             = new List<ToolDefinition> { ToolDefinition.Mcp(serverLabel ?? "agentic", mcpServerUrl, allowedTools, mcpHeaders) };
+        var effectiveThinking = thinking ?? Options.Thinking;
+        var userInput         = ResponseInput.User(text, images);
+
+        AgentResponse response;
+        if (Context is not null && _lastResponseId is null && Context.IsCheckpointed)
+        {
+            var inputs = Context.GetHotTailAsInput();
+            inputs.Add(userInput);
+            response = await ConsumeStreamAsync(_lm.RespondStreamingAsync(inputs,
+                instructions: instructions, temperature: Options.Temperature,
+                tools: tools, thinking: effectiveThinking, ct: ct));
+        }
+        else
+        {
+            response = await ConsumeStreamAsync(_lm.RespondStreamingAsync([userInput],
+                instructions: instructions, previousResponseId: _lastResponseId,
+                temperature: Options.Temperature, tools: tools, thinking: effectiveThinking, ct: ct));
+        }
+
+        RecordResponse(text, response);
         return response;
     }
 
