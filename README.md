@@ -191,6 +191,7 @@ foreach (var r in results)
 | `OnEvent` | `null` | Callback fired for every `AgentEvent` |
 | `Compaction` | `null` | Enable context compaction (see above) |
 | `Thinking` | `null` | Per-agent thinking default (see [Thinking Control](#thinking-control)) |
+| `Model` | `null` | Per-agent model default (see [Model Selection](#model-selection)) |
 
 ---
 
@@ -242,6 +243,84 @@ var response = await agent.ChatStreamAsync(
 ```
 
 > **Precedence:** per-request → per-agent (`AgentOptions.Thinking`) → global (`LMConfig.Thinking`) → not sent (model default).
+
+---
+
+## Model Selection
+
+Agentic supports multiple named model aliases in a single `LM` instance. You define them once in `LMConfig.Models` and then reference them by key at the agent or per-call level — the same three-level override pattern used by [Thinking Control](#thinking-control).
+
+### 1 — Define aliases in LMConfig
+
+`ModelName` is the default model used for every request. `Models` maps short keys to full model identifiers. Aliases that are not in the dictionary are treated as literal model IDs, so you can also pass a raw model name directly.
+
+```csharp
+var lm = new LM(new LMConfig
+{
+    Endpoint       = "http://localhost:1234",
+    ModelName      = "qwen3.5-4b",               // default for all requests
+    EmbeddingModel = "text-embedding-qwen3-0.6b",
+    Models =
+    {
+        ["advanced"] = "qwen3.5-9b",             // heavy reasoning
+        ["ocr"]      = "lightonocr-2-1b",        // vision / OCR
+    },
+});
+```
+
+You can inspect what a key resolves to at any time:
+
+```csharp
+string modelId = lm.ResolveModel("ocr");   // → "lightonocr-2-1b"
+string modelId = lm.ResolveModel(null);    // → "qwen3.5-4b"  (the default)
+```
+
+### 2 — Per-agent default (AgentOptions)
+
+Set `AgentOptions.Model` to pin every call made by that agent to a specific alias or literal model ID, overriding `LMConfig.ModelName`.
+
+```csharp
+// This agent always uses the advanced model
+var heavyAgent = new Agent(lm, new AgentOptions
+{
+    SystemPrompt = "You are a research assistant.",
+    Model        = "advanced",
+});
+
+// This agent always uses the OCR model
+var ocrAgent = new Agent(lm, new AgentOptions
+{
+    SystemPrompt = "Extract text from the provided images.",
+    Model        = "ocr",
+});
+```
+
+### 3 — Per-request override
+
+Pass `model:` to any `Run*` / `Chat*` call to override the model for just that one turn. This takes precedence over both the agent and global defaults.
+
+```csharp
+// Use the OCR model for a single image turn, then continue with the default
+await agent.ChatStreamAsync(
+    "Extract all text from this receipt.",
+    images:       [dataUrl],
+    mcpServerUrl: "http://localhost:5100/mcp",
+    model:        "ocr");
+
+// Use the advanced model for a one-off complex question
+var response = await agent.ChatStreamAsync(
+    "Analyse the trade-offs of this architecture.",
+    mcpServerUrl: "http://localhost:5100/mcp",
+    model:        "advanced");
+
+// Pass a raw model ID if you haven't added it as an alias
+var response = await agent.RunAsync(
+    "Summarise this.",
+    mcpServerUrl: "http://localhost:5100/mcp",
+    model:        "some-other-model-id");
+```
+
+> **Precedence:** per-request `model:` → `AgentOptions.Model` → `LMConfig.ModelName`.
 
 ---
 

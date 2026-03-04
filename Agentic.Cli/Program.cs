@@ -5,10 +5,6 @@ using Agentic.Mcp;
 
 Console.OutputEncoding = System.Text.Encoding.UTF8;
 
-// ── Config (override via CLI args: [endpoint] [model]) ────────────────────
-var endpoint = args.Length > 0 ? args[0] : "http://10.1.20.127:1234";
-var model = args.Length > 1 ? args[1] : "qwen/qwen3.5-9b";
-
 // ── MCP host ──────────────────────────────────────────────────────────────
 var builder = WebApplication.CreateBuilder([]);  // don't forward CLI args to ASP.NET
 builder.Logging.SetMinimumLevel(LogLevel.None);                          // suppress ASP.NET/Kestrel noise
@@ -18,12 +14,16 @@ builder.WebHost.UseUrls("http://10.1.20.127:5100");
 builder.Services.AddAgenticMcp(opt => opt.ApiKey = "dev-secret-key-1234");
 builder.Services.AddStore(builder.Configuration);  // provider driven by Database:Provider config key
 
-using var lm = new LM(new LMConfig
-{
-    ModelName      = model,
+var config = new LMConfig {
+    ModelName = "qwen3.5-4b",
     EmbeddingModel = "text-embedding-qwen3-embedding-0.6b",
-    Endpoint       = endpoint,
-});
+    Endpoint = "http://10.1.20.127:1234",
+    Models = new Dictionary<string, string> {
+        ["ocr"] = "lightonocr-2-1b"
+    }
+};
+
+using var lm = new LM(config);
 
 var app = builder.Build();
 app.UseStaticFiles();
@@ -44,7 +44,7 @@ if (mcpOptions.ApiKey is not null)
     mcpUrl = $"{mcpUrl}?key={Uri.EscapeDataString(mcpOptions.ApiKey)}";
 
 // ── Banner ────────────────────────────────────────────────────────────────
-PrintBanner($"Agentic CLI  ·  {mcpUrl}  ·  {model}");
+PrintBanner($"Agentic CLI  ·  {mcpUrl}");
 Console.WriteLine();
 WriteDim($"Tools: {string.Join(", ", toolRegistry.GetAllDescriptors().Select(d => d.Name))}");
 var docFiles = Directory.Exists(docsFolder)
@@ -61,7 +61,7 @@ Console.Write("  LM server  ");
 if (await lm.PingAsync())
     Write(ConsoleColor.Green, "● online\n");
 else
-    Write(ConsoleColor.Red, $"● unreachable at {endpoint}\n");
+    Write(ConsoleColor.Red, $"● unreachable at {config.Endpoint}\n");
 
 Console.WriteLine();
 

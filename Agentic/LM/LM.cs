@@ -26,6 +26,11 @@ public class LMConfig
     /// <c>null</c> = omit the flag entirely (server default).
     /// </summary>
     public ThinkingConfig? Thinking { get; set; }
+    /// <summary>
+    /// Named model aliases. Map a short key (e.g. <c>"advanced"</c>, <c>"ocr"</c>) to the full
+    /// model identifier sent to the server. Resolved by <see cref="LM.ResolveModel"/>.
+    /// </summary>
+    public Dictionary<string, string> Models { get; set; } = [];
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -45,8 +50,8 @@ public sealed class LMException(string message, int statusCode, string? body) : 
 }
 
 /// <summary>
-/// OpenAI-compatible REST client supporting <c>/v1/responses</c> (streaming + non-streaming),
-/// <c>/v1/chat/completions</c> (vision), and <c>/v1/embeddings</c>.
+/// OpenAI-compatible REST client supporting <c>/v1/responses</c> (streaming + non-streaming)
+/// and <c>/v1/embeddings</c>.
 /// </summary>
 public sealed class LM : IDisposable
 {
@@ -82,15 +87,17 @@ public sealed class LM : IDisposable
     /// <param name="tools">Tool definitions (e.g. MCP servers) available to the model.</param>
     /// <param name="reasoning">Optional reasoning configuration.</param>
     /// <param name="thinking">Qwen thinking override; <c>null</c> falls back to <see cref="LMConfig.Thinking"/>.</param>
+    /// <param name="model">Model override. Accepts a named alias from <see cref="LMConfig.Models"/> or a literal model ID; <c>null</c> falls back to <see cref="LMConfig.ModelName"/>.</param>
     /// <param name="ct">Cancellation token.</param>
     public async Task<ResponseResponse> RespondAsync(
         string input, string? instructions = null, string? previousResponseId = null,
         double temperature = 0, List<ToolDefinition>? tools = null,
-        ReasoningConfig? reasoning = null, ThinkingConfig? thinking = null, CancellationToken ct = default)
+        ReasoningConfig? reasoning = null, ThinkingConfig? thinking = null,
+        string? model = null, CancellationToken ct = default)
     {
         var req = new ResponseRequest
         {
-            Model = _config.ModelName, Input = input, Instructions = instructions,
+            Model = ResolveModel(model), Input = input, Instructions = instructions,
             PreviousResponseId = previousResponseId, Temperature = temperature,
             Tools = tools, Reasoning = reasoning,
         };
@@ -106,15 +113,17 @@ public sealed class LM : IDisposable
     /// <param name="tools">Tool definitions available to the model.</param>
     /// <param name="reasoning">Optional reasoning configuration.</param>
     /// <param name="thinking">Qwen thinking override; <c>null</c> falls back to <see cref="LMConfig.Thinking"/>.</param>
+    /// <param name="model">Model override. Accepts a named alias from <see cref="LMConfig.Models"/> or a literal model ID; <c>null</c> falls back to <see cref="LMConfig.ModelName"/>.</param>
     /// <param name="ct">Cancellation token.</param>
     public async Task<ResponseResponse> RespondAsync(
         IEnumerable<ResponseInput> input, string? instructions = null, string? previousResponseId = null,
         double temperature = 0, List<ToolDefinition>? tools = null,
-        ReasoningConfig? reasoning = null, ThinkingConfig? thinking = null, CancellationToken ct = default)
+        ReasoningConfig? reasoning = null, ThinkingConfig? thinking = null,
+        string? model = null, CancellationToken ct = default)
     {
         var req = new ResponseRequest
         {
-            Model = _config.ModelName, Input = input.ToList(), Instructions = instructions,
+            Model = ResolveModel(model), Input = input.ToList(), Instructions = instructions,
             PreviousResponseId = previousResponseId, Temperature = temperature,
             Tools = tools, Reasoning = reasoning,
         };
@@ -130,16 +139,18 @@ public sealed class LM : IDisposable
     /// <param name="tools">Tool definitions available to the model.</param>
     /// <param name="reasoning">Optional reasoning configuration.</param>
     /// <param name="thinking">Qwen thinking override; <c>null</c> falls back to <see cref="LMConfig.Thinking"/>.</param>
+    /// <param name="model">Model override. Accepts a named alias from <see cref="LMConfig.Models"/> or a literal model ID; <c>null</c> falls back to <see cref="LMConfig.ModelName"/>.</param>
     /// <param name="ct">Cancellation token.</param>
     public async IAsyncEnumerable<StreamEvent> RespondStreamingAsync(
         string input, string? instructions = null, string? previousResponseId = null,
         double temperature = 0, List<ToolDefinition>? tools = null,
         ReasoningConfig? reasoning = null, ThinkingConfig? thinking = null,
+        string? model = null,
         [EnumeratorCancellation] CancellationToken ct = default)
     {
         var request = new ResponseRequest
         {
-            Model = _config.ModelName, Input = input, Instructions = instructions,
+            Model = ResolveModel(model), Input = input, Instructions = instructions,
             PreviousResponseId = previousResponseId, Temperature = temperature,
             Tools = tools, Reasoning = reasoning, Stream = true,
         };
@@ -156,17 +167,19 @@ public sealed class LM : IDisposable
     /// <param name="tools">Tool definitions available to the model.</param>
     /// <param name="reasoning">Optional reasoning configuration.</param>
     /// <param name="thinking">Qwen thinking override; <c>null</c> falls back to <see cref="LMConfig.Thinking"/>.</param>
+    /// <param name="model">Model override. Accepts a named alias from <see cref="LMConfig.Models"/> or a literal model ID; <c>null</c> falls back to <see cref="LMConfig.ModelName"/>.</param>
     /// <param name="ct">Cancellation token.</param>
     public async IAsyncEnumerable<StreamEvent> RespondStreamingAsync(
         IEnumerable<ResponseInput> input, string? instructions = null,
         string? previousResponseId = null,
         double temperature = 0, List<ToolDefinition>? tools = null,
         ReasoningConfig? reasoning = null, ThinkingConfig? thinking = null,
+        string? model = null,
         [EnumeratorCancellation] CancellationToken ct = default)
     {
         var request = new ResponseRequest
         {
-            Model = _config.ModelName, Input = input.ToList(), Instructions = instructions,
+            Model = ResolveModel(model), Input = input.ToList(), Instructions = instructions,
             PreviousResponseId = previousResponseId,
             Temperature = temperature, Tools = tools, Reasoning = reasoning, Stream = true,
         };
@@ -229,26 +242,28 @@ public sealed class LM : IDisposable
         }
     }
 
-    /// <summary>Describe an image using /v1/chat/completions multimodal (works on all VLM servers).</summary>
-    public async Task<string> DescribeImageAsync(
-        string prompt, string imageUrl, int maxTokens = 1024,
-        double temperature = 0, CancellationToken ct = default)
+    /// <summary>
+    /// Sends a one-shot vision request to <c>/v1/responses</c> with thinking disabled and returns the text output.
+    /// Accepts HTTP(S) URLs and <c>data:image/…;base64,…</c> data URLs.
+    /// </summary>
+    public Task<string> DescribeImageAsync(string prompt, string imageUrl, CancellationToken ct = default)
+        => DescribeImageAsync(prompt, [imageUrl], ct);
+
+    /// <summary>
+    /// Sends a one-shot vision request to <c>/v1/responses</c> with thinking disabled and returns the text output.
+    /// Pass multiple image URLs or <c>data:image/…;base64,…</c> data URLs in <paramref name="imageUrls"/>.
+    /// </summary>
+    public async Task<string> DescribeImageAsync(string prompt, IEnumerable<string> imageUrls, CancellationToken ct = default)
     {
-        var req = new VisionRequest
-        {
-            Model = _config.ModelName,
-            MaxTokens = maxTokens,
-            Temperature = temperature,
-            Messages =
-            [
-                new()
-                {
-                    Content = [new VisionTextPart(prompt), new VisionImagePart(imageUrl)],
-                }
-            ],
-        };
-        var resp = await PostAsync<VisionRequest, VisionResponse>("/v1/chat/completions", req, ct);
-        return resp.Choices.FirstOrDefault()?.Message.Content ?? "";
+        var resp = await RespondAsync(
+            [ResponseInput.User(prompt, imageUrls)],
+            thinking: new ThinkingConfig { Enabled = false },
+            ct: ct);
+        return resp.Output
+            .SelectMany(item => item.Content ?? [])
+            .Where(c => c.Type == "output_text")
+            .Select(c => c.Text ?? "")
+            .FirstOrDefault() ?? "";
     }
 
     // ── Embeddings ───────────────────────────────────────────────────────
@@ -323,6 +338,21 @@ public sealed class LM : IDisposable
     {
         if (thinking is null) return;
         request.EnableThinking = thinking.Enabled;
+    }
+
+    /// <summary>
+    /// Resolves a model alias or literal model ID to the actual model name sent to the server.
+    /// <list type="bullet">
+    /// <item><c>null</c> → <see cref="LMConfig.ModelName"/> (the default)</item>
+    /// <item>key found in <see cref="LMConfig.Models"/> → mapped value</item>
+    /// <item>otherwise → the string is used as a literal model ID</item>
+    /// </list>
+    /// </summary>
+    public string ResolveModel(string? alias)
+    {
+        if (alias is null) return _config.ModelName;
+        if (_config.Models.TryGetValue(alias, out var resolved)) return resolved;
+        return alias;
     }
 
     public void Dispose() { if (_ownsClient) _http.Dispose(); }

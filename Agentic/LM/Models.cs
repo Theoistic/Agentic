@@ -212,60 +212,6 @@ public sealed class ResponseInput
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-//  Vision (chat completions multimodal — universally supported by VLM servers)
-// ═══════════════════════════════════════════════════════════════════════════
-
-internal sealed class VisionRequest
-{
-    [JsonPropertyName("model")]      public string Model { get; set; } = "";
-    [JsonPropertyName("messages")]   public List<VisionMessage> Messages { get; set; } = [];
-    [JsonPropertyName("max_tokens")] public int MaxTokens { get; set; } = 1024;
-    [JsonPropertyName("temperature"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
-    public double Temperature { get; set; }
-}
-
-internal sealed class VisionMessage
-{
-    [JsonPropertyName("role")]    public string Role { get; set; } = "user";
-    [JsonPropertyName("content")] public List<VisionContentPart> Content { get; set; } = [];
-}
-
-[JsonPolymorphic(TypeDiscriminatorPropertyName = "type")]
-[JsonDerivedType(typeof(VisionTextPart), "text")]
-[JsonDerivedType(typeof(VisionImagePart), "image_url")]
-internal abstract class VisionContentPart { }
-
-internal sealed class VisionTextPart(string text) : VisionContentPart
-{
-    [JsonPropertyName("text")] public string Text { get; set; } = text;
-}
-
-internal sealed class VisionImagePart(string url) : VisionContentPart
-{
-    [JsonPropertyName("image_url")] public VisionImageUrl ImageUrl { get; set; } = new(url);
-}
-
-internal sealed class VisionImageUrl(string url)
-{
-    [JsonPropertyName("url")] public string Url { get; set; } = url;
-}
-
-internal sealed class VisionResponse
-{
-    [JsonPropertyName("choices")] public List<VisionChoice> Choices { get; set; } = [];
-}
-
-internal sealed class VisionChoice
-{
-    [JsonPropertyName("message")] public VisionChoiceMessage Message { get; set; } = new();
-}
-
-internal sealed class VisionChoiceMessage
-{
-    [JsonPropertyName("content")] public string? Content { get; set; }
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
 //  /v1/embeddings models
 // ═══════════════════════════════════════════════════════════════════════════
 

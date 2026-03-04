@@ -19,7 +19,7 @@ public class ImageTools(LM lm) : IAgentToolSet
             // The LM server blocks private-IP URLs (SSRF prevention).
             // Download the image here and forward it as a base64 data URL instead.
             var dataUrl = await ToDataUrlAsync(imageUrl);
-            var resp    = await lm.RespondAsync([ResponseInput.User(prompt, [dataUrl])]);
+            var resp    = await lm.RespondAsync([ResponseInput.User(prompt, [dataUrl])], model: "ocr");
             return ExtractText(resp) is { Length: > 0 } t ? t : "(no response)";
         }
         catch (Exception ex)

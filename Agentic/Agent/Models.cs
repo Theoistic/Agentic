@@ -64,6 +64,12 @@ public sealed class AgentOptions
     /// Overrides <see cref="LMConfig.Thinking"/> when set; <c>null</c> falls back to the LM-level default.
     /// </summary>
     public ThinkingConfig? Thinking { get; set; }
+    /// <summary>
+    /// Agent-level model override. Accepts a named alias from <see cref="LMConfig.Models"/> or a literal
+    /// model ID. <c>null</c> falls back to <see cref="LMConfig.ModelName"/>.
+    /// Overridable per-call via the <c>model</c> parameter on each agent method.
+    /// </summary>
+    public string? Model { get; set; }
 }
 
 /// <summary>Records a single tool call that was executed during an agent turn.</summary>

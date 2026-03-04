@@ -68,17 +68,19 @@ public sealed class Agent : IAsyncDisposable
     /// <param name="allowedTools">Optional allow-list of tool names; <c>null</c> means all tools.</param>
     /// <param name="mcpHeaders">Optional HTTP headers forwarded to the MCP server.</param>
     /// <param name="thinking">Per-call thinking override. Overrides <see cref="AgentOptions.Thinking"/> when set.</param>
+    /// <param name="model">Per-call model override. Accepts a named alias from <see cref="LMConfig.Models"/> or a literal model ID; <c>null</c> falls back to <see cref="AgentOptions.Model"/> then <see cref="LMConfig.ModelName"/>.</param>
     /// <param name="ct">Cancellation token.</param>
     public async Task<AgentResponse> RunAsync(
         string input, string mcpServerUrl, string? serverLabel = null,
         List<string>? allowedTools = null, Dictionary<string, string>? mcpHeaders = null,
-        ThinkingConfig? thinking = null, CancellationToken ct = default)
+        ThinkingConfig? thinking = null, string? model = null, CancellationToken ct = default)
     {
         Emit(AgentEventKind.UserInput, text: input);
+        var effectiveModel = model ?? Options.Model;
         var resp = await _lm.RespondAsync(input,
             instructions: Options.SystemPrompt, temperature: Options.Temperature,
             tools: [ToolDefinition.Mcp(serverLabel ?? "agentic", mcpServerUrl, allowedTools, mcpHeaders)],
-            thinking: thinking ?? Options.Thinking, ct: ct);
+            thinking: thinking ?? Options.Thinking, model: effectiveModel, ct: ct);
         return ParseOutput(resp);
     }
 
@@ -90,17 +92,19 @@ public sealed class Agent : IAsyncDisposable
     /// <param name="allowedTools">Optional allow-list of tool names; <c>null</c> means all tools.</param>
     /// <param name="mcpHeaders">Optional HTTP headers forwarded to the MCP server.</param>
     /// <param name="thinking">Per-call thinking override. Overrides <see cref="AgentOptions.Thinking"/> when set.</param>
+    /// <param name="model">Per-call model override. Accepts a named alias from <see cref="LMConfig.Models"/> or a literal model ID; <c>null</c> falls back to <see cref="AgentOptions.Model"/> then <see cref="LMConfig.ModelName"/>.</param>
     /// <param name="ct">Cancellation token.</param>
     public async Task<AgentResponse> RunAsync(
         string text, IEnumerable<string> images, string mcpServerUrl, string? serverLabel = null,
         List<string>? allowedTools = null, Dictionary<string, string>? mcpHeaders = null,
-        ThinkingConfig? thinking = null, CancellationToken ct = default)
+        ThinkingConfig? thinking = null, string? model = null, CancellationToken ct = default)
     {
         Emit(AgentEventKind.UserInput, text: text);
+        var effectiveModel = model ?? Options.Model;
         var resp = await _lm.RespondAsync([ResponseInput.User(text, images)],
             instructions: Options.SystemPrompt, temperature: Options.Temperature,
             tools: [ToolDefinition.Mcp(serverLabel ?? "agentic", mcpServerUrl, allowedTools, mcpHeaders)],
-            thinking: thinking ?? Options.Thinking, ct: ct);
+            thinking: thinking ?? Options.Thinking, model: effectiveModel, ct: ct);
         return ParseOutput(resp);
     }
 
@@ -111,11 +115,12 @@ public sealed class Agent : IAsyncDisposable
     /// <param name="allowedTools">Optional allow-list of tool names; <c>null</c> means all tools.</param>
     /// <param name="mcpHeaders">Optional HTTP headers forwarded to the MCP server.</param>
     /// <param name="thinking">Per-call thinking override. Overrides <see cref="AgentOptions.Thinking"/> when set.</param>
+    /// <param name="model">Per-call model override. Accepts a named alias from <see cref="LMConfig.Models"/> or a literal model ID; <c>null</c> falls back to <see cref="AgentOptions.Model"/> then <see cref="LMConfig.ModelName"/>.</param>
     /// <param name="ct">Cancellation token.</param>
     public async Task<AgentResponse> ChatAsync(
         string input, string mcpServerUrl, string? serverLabel = null,
         List<string>? allowedTools = null, Dictionary<string, string>? mcpHeaders = null,
-        ThinkingConfig? thinking = null, CancellationToken ct = default)
+        ThinkingConfig? thinking = null, string? model = null, CancellationToken ct = default)
     {
         Emit(AgentEventKind.UserInput, text: input);
         if (Context?.ShouldCompact == true) await CompactAsync(ct: ct);
@@ -123,6 +128,7 @@ public sealed class Agent : IAsyncDisposable
         var instructions = Context?.GetEffectiveSystemPrompt(Options.SystemPrompt) ?? Options.SystemPrompt;
         var tools = new List<ToolDefinition> { ToolDefinition.Mcp(serverLabel ?? "agentic", mcpServerUrl, allowedTools, mcpHeaders) };
         var effectiveThinking = thinking ?? Options.Thinking;
+        var effectiveModel = model ?? Options.Model;
 
         ResponseResponse resp;
         if (Context is not null && _lastResponseId is null && Context.IsCheckpointed)
@@ -130,13 +136,14 @@ public sealed class Agent : IAsyncDisposable
             var inputs = Context.GetHotTailAsInput();
             inputs.Add(new ResponseInput { Role = "user", Content = input });
             resp = await _lm.RespondAsync(inputs, instructions: instructions,
-                temperature: Options.Temperature, tools: tools, thinking: effectiveThinking, ct: ct);
+                temperature: Options.Temperature, tools: tools, thinking: effectiveThinking,
+                model: effectiveModel, ct: ct);
         }
         else
         {
             resp = await _lm.RespondAsync(input, instructions: instructions,
                 previousResponseId: _lastResponseId, temperature: Options.Temperature,
-                tools: tools, thinking: effectiveThinking, ct: ct);
+                tools: tools, thinking: effectiveThinking, model: effectiveModel, ct: ct);
         }
 
         _lastResponseId = resp.ResponseId;
@@ -153,11 +160,12 @@ public sealed class Agent : IAsyncDisposable
     /// <param name="allowedTools">Optional allow-list of tool names; <c>null</c> means all tools.</param>
     /// <param name="mcpHeaders">Optional HTTP headers forwarded to the MCP server.</param>
     /// <param name="thinking">Per-call thinking override. Overrides <see cref="AgentOptions.Thinking"/> when set.</param>
+    /// <param name="model">Per-call model override. Accepts a named alias from <see cref="LMConfig.Models"/> or a literal model ID; <c>null</c> falls back to <see cref="AgentOptions.Model"/> then <see cref="LMConfig.ModelName"/>.</param>
     /// <param name="ct">Cancellation token.</param>
     public async Task<AgentResponse> ChatAsync(
         string text, IEnumerable<string> images, string mcpServerUrl, string? serverLabel = null,
         List<string>? allowedTools = null, Dictionary<string, string>? mcpHeaders = null,
-        ThinkingConfig? thinking = null, CancellationToken ct = default)
+        ThinkingConfig? thinking = null, string? model = null, CancellationToken ct = default)
     {
         Emit(AgentEventKind.UserInput, text: text);
         if (Context?.ShouldCompact == true) await CompactAsync(ct: ct);
@@ -165,6 +173,7 @@ public sealed class Agent : IAsyncDisposable
         var instructions   = Context?.GetEffectiveSystemPrompt(Options.SystemPrompt) ?? Options.SystemPrompt;
         var tools          = new List<ToolDefinition> { ToolDefinition.Mcp(serverLabel ?? "agentic", mcpServerUrl, allowedTools, mcpHeaders) };
         var effectiveThinking = thinking ?? Options.Thinking;
+        var effectiveModel = model ?? Options.Model;
         var userInput      = ResponseInput.User(text, images);
 
         ResponseResponse resp;
@@ -173,13 +182,14 @@ public sealed class Agent : IAsyncDisposable
             var inputs = Context.GetHotTailAsInput();
             inputs.Add(userInput);
             resp = await _lm.RespondAsync(inputs, instructions: instructions,
-                temperature: Options.Temperature, tools: tools, thinking: effectiveThinking, ct: ct);
+                temperature: Options.Temperature, tools: tools, thinking: effectiveThinking,
+                model: effectiveModel, ct: ct);
         }
         else
         {
             resp = await _lm.RespondAsync([userInput], instructions: instructions,
                 previousResponseId: _lastResponseId, temperature: Options.Temperature,
-                tools: tools, thinking: effectiveThinking, ct: ct);
+                tools: tools, thinking: effectiveThinking, model: effectiveModel, ct: ct);
         }
 
         _lastResponseId = resp.ResponseId;
@@ -195,17 +205,19 @@ public sealed class Agent : IAsyncDisposable
     /// <param name="allowedTools">Optional allow-list of tool names; <c>null</c> means all tools.</param>
     /// <param name="mcpHeaders">Optional HTTP headers forwarded to the MCP server.</param>
     /// <param name="thinking">Per-call thinking override. Overrides <see cref="AgentOptions.Thinking"/> when set.</param>
+    /// <param name="model">Per-call model override. Accepts a named alias from <see cref="LMConfig.Models"/> or a literal model ID; <c>null</c> falls back to <see cref="AgentOptions.Model"/> then <see cref="LMConfig.ModelName"/>.</param>
     /// <param name="ct">Cancellation token.</param>
     public async Task<AgentResponse> RunStreamAsync(
         string input, string mcpServerUrl, string? serverLabel = null,
         List<string>? allowedTools = null, Dictionary<string, string>? mcpHeaders = null,
-        ThinkingConfig? thinking = null, CancellationToken ct = default)
+        ThinkingConfig? thinking = null, string? model = null, CancellationToken ct = default)
     {
         Emit(AgentEventKind.UserInput, text: input);
+        var effectiveModel = model ?? Options.Model;
         return await ConsumeStreamAsync(_lm.RespondStreamingAsync(input,
             instructions: Options.SystemPrompt, temperature: Options.Temperature,
             tools: [ToolDefinition.Mcp(serverLabel ?? "agentic", mcpServerUrl, allowedTools, mcpHeaders)],
-            thinking: thinking ?? Options.Thinking, ct: ct));
+            thinking: thinking ?? Options.Thinking, model: effectiveModel, ct: ct));
     }
 
     /// <summary>Single-shot streaming /v1/responses with text and images, with real-time events. Does not maintain conversation history.</summary>
@@ -216,17 +228,19 @@ public sealed class Agent : IAsyncDisposable
     /// <param name="allowedTools">Optional allow-list of tool names; <c>null</c> means all tools.</param>
     /// <param name="mcpHeaders">Optional HTTP headers forwarded to the MCP server.</param>
     /// <param name="thinking">Per-call thinking override. Overrides <see cref="AgentOptions.Thinking"/> when set.</param>
+    /// <param name="model">Per-call model override. Accepts a named alias from <see cref="LMConfig.Models"/> or a literal model ID; <c>null</c> falls back to <see cref="AgentOptions.Model"/> then <see cref="LMConfig.ModelName"/>.</param>
     /// <param name="ct">Cancellation token.</param>
     public async Task<AgentResponse> RunStreamAsync(
         string text, IEnumerable<string> images, string mcpServerUrl, string? serverLabel = null,
         List<string>? allowedTools = null, Dictionary<string, string>? mcpHeaders = null,
-        ThinkingConfig? thinking = null, CancellationToken ct = default)
+        ThinkingConfig? thinking = null, string? model = null, CancellationToken ct = default)
     {
         Emit(AgentEventKind.UserInput, text: text);
+        var effectiveModel = model ?? Options.Model;
         return await ConsumeStreamAsync(_lm.RespondStreamingAsync([ResponseInput.User(text, images)],
             instructions: Options.SystemPrompt, temperature: Options.Temperature,
             tools: [ToolDefinition.Mcp(serverLabel ?? "agentic", mcpServerUrl, allowedTools, mcpHeaders)],
-            thinking: thinking ?? Options.Thinking, ct: ct));
+            thinking: thinking ?? Options.Thinking, model: effectiveModel, ct: ct));
     }
 
     /// <summary>Multi-turn streaming /v1/responses with <c>previous_response_id</c> chaining and real-time events.</summary>
@@ -236,11 +250,12 @@ public sealed class Agent : IAsyncDisposable
     /// <param name="allowedTools">Optional allow-list of tool names; <c>null</c> means all tools.</param>
     /// <param name="mcpHeaders">Optional HTTP headers forwarded to the MCP server.</param>
     /// <param name="thinking">Per-call thinking override. Overrides <see cref="AgentOptions.Thinking"/> when set.</param>
+    /// <param name="model">Per-call model override. Accepts a named alias from <see cref="LMConfig.Models"/> or a literal model ID; <c>null</c> falls back to <see cref="AgentOptions.Model"/> then <see cref="LMConfig.ModelName"/>.</param>
     /// <param name="ct">Cancellation token.</param>
     public async Task<AgentResponse> ChatStreamAsync(
         string input, string mcpServerUrl, string? serverLabel = null,
         List<string>? allowedTools = null, Dictionary<string, string>? mcpHeaders = null,
-        ThinkingConfig? thinking = null, CancellationToken ct = default)
+        ThinkingConfig? thinking = null, string? model = null, CancellationToken ct = default)
     {
         Emit(AgentEventKind.UserInput, text: input);
         if (Context?.ShouldCompact == true) await CompactAsync(ct: ct);
@@ -248,6 +263,7 @@ public sealed class Agent : IAsyncDisposable
         var instructions = Context?.GetEffectiveSystemPrompt(Options.SystemPrompt) ?? Options.SystemPrompt;
         var tools = new List<ToolDefinition> { ToolDefinition.Mcp(serverLabel ?? "agentic", mcpServerUrl, allowedTools, mcpHeaders) };
         var effectiveThinking = thinking ?? Options.Thinking;
+        var effectiveModel = model ?? Options.Model;
 
         AgentResponse response;
         if (Context is not null && _lastResponseId is null && Context.IsCheckpointed)
@@ -256,13 +272,14 @@ public sealed class Agent : IAsyncDisposable
             inputs.Add(new ResponseInput { Role = "user", Content = input });
             response = await ConsumeStreamAsync(_lm.RespondStreamingAsync(inputs,
                 instructions: instructions, temperature: Options.Temperature,
-                tools: tools, thinking: effectiveThinking, ct: ct));
+                tools: tools, thinking: effectiveThinking, model: effectiveModel, ct: ct));
         }
         else
         {
             response = await ConsumeStreamAsync(_lm.RespondStreamingAsync(input,
                 instructions: instructions, previousResponseId: _lastResponseId,
-                temperature: Options.Temperature, tools: tools, thinking: effectiveThinking, ct: ct));
+                temperature: Options.Temperature, tools: tools, thinking: effectiveThinking,
+                model: effectiveModel, ct: ct));
         }
 
         RecordResponse(input, response);
@@ -277,11 +294,12 @@ public sealed class Agent : IAsyncDisposable
     /// <param name="allowedTools">Optional allow-list of tool names; <c>null</c> means all tools.</param>
     /// <param name="mcpHeaders">Optional HTTP headers forwarded to the MCP server.</param>
     /// <param name="thinking">Per-call thinking override. Overrides <see cref="AgentOptions.Thinking"/> when set.</param>
+    /// <param name="model">Per-call model override. Accepts a named alias from <see cref="LMConfig.Models"/> or a literal model ID; <c>null</c> falls back to <see cref="AgentOptions.Model"/> then <see cref="LMConfig.ModelName"/>.</param>
     /// <param name="ct">Cancellation token.</param>
     public async Task<AgentResponse> ChatStreamAsync(
         string text, IEnumerable<string> images, string mcpServerUrl, string? serverLabel = null,
         List<string>? allowedTools = null, Dictionary<string, string>? mcpHeaders = null,
-        ThinkingConfig? thinking = null, CancellationToken ct = default)
+        ThinkingConfig? thinking = null, string? model = null, CancellationToken ct = default)
     {
         Emit(AgentEventKind.UserInput, text: text);
         if (Context?.ShouldCompact == true) await CompactAsync(ct: ct);
@@ -289,6 +307,7 @@ public sealed class Agent : IAsyncDisposable
         var instructions      = Context?.GetEffectiveSystemPrompt(Options.SystemPrompt) ?? Options.SystemPrompt;
         var tools             = new List<ToolDefinition> { ToolDefinition.Mcp(serverLabel ?? "agentic", mcpServerUrl, allowedTools, mcpHeaders) };
         var effectiveThinking = thinking ?? Options.Thinking;
+        var effectiveModel    = model ?? Options.Model;
         var userInput         = ResponseInput.User(text, images);
 
         AgentResponse response;
@@ -298,13 +317,14 @@ public sealed class Agent : IAsyncDisposable
             inputs.Add(userInput);
             response = await ConsumeStreamAsync(_lm.RespondStreamingAsync(inputs,
                 instructions: instructions, temperature: Options.Temperature,
-                tools: tools, thinking: effectiveThinking, ct: ct));
+                tools: tools, thinking: effectiveThinking, model: effectiveModel, ct: ct));
         }
         else
         {
             response = await ConsumeStreamAsync(_lm.RespondStreamingAsync([userInput],
                 instructions: instructions, previousResponseId: _lastResponseId,
-                temperature: Options.Temperature, tools: tools, thinking: effectiveThinking, ct: ct));
+                temperature: Options.Temperature, tools: tools, thinking: effectiveThinking,
+                model: effectiveModel, ct: ct));
         }
 
         RecordResponse(text, response);
@@ -324,13 +344,14 @@ public sealed class Agent : IAsyncDisposable
     /// <param name="allowedTools">Optional allow-list of tool names; <c>null</c> means all tools.</param>
     /// <param name="mcpHeaders">Optional HTTP headers forwarded to the MCP server.</param>
     /// <param name="thinking">Per-call thinking override. Overrides <see cref="AgentOptions.Thinking"/> when set.</param>
+    /// <param name="model">Per-call model override. Accepts a named alias from <see cref="LMConfig.Models"/> or a literal model ID; <c>null</c> falls back to <see cref="AgentOptions.Model"/> then <see cref="LMConfig.ModelName"/>.</param>
     /// <param name="maxRounds">Maximum number of model turns before the workflow is aborted.</param>
     /// <param name="ct">Cancellation token.</param>
     public async Task<WorkflowResult> RunWorkflowAsync(
         Workflow workflow, string input, string mcpServerUrl,
         string? serverLabel = null, List<string>? allowedTools = null,
         Dictionary<string, string>? mcpHeaders = null,
-        ThinkingConfig? thinking = null, int maxRounds = 10, CancellationToken ct = default)
+        ThinkingConfig? thinking = null, string? model = null, int maxRounds = 10, CancellationToken ct = default)
     {
         workflow.Reset();
         Emit(AgentEventKind.UserInput, text: input);
@@ -341,6 +362,7 @@ public sealed class Agent : IAsyncDisposable
         var mcpTools = new List<ToolDefinition> { ToolDefinition.Mcp(serverLabel ?? "agentic", mcpServerUrl, allowedTools, mcpHeaders) };
         var currentInput = input;
         var effectiveThinking = thinking ?? Options.Thinking;
+        var effectiveModel = model ?? Options.Model;
 
         for (int round = 0; round < maxRounds; round++)
         {
@@ -348,7 +370,7 @@ public sealed class Agent : IAsyncDisposable
                 _lm.RespondStreamingAsync(currentInput,
                     instructions: systemPrompt, previousResponseId: _lastResponseId,
                     temperature: Options.Temperature, tools: mcpTools,
-                    thinking: effectiveThinking, ct: ct));
+                    thinking: effectiveThinking, model: effectiveModel, ct: ct));
 
             allInvocations.AddRange(response.ToolInvocations);
             if (allText.Length > 0) allText.AppendLine();
