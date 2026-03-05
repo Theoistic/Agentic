@@ -361,3 +361,6 @@ MigrationBackup/
 
 # Fody - auto-generated XML schema
 FodyWeavers.xsd
+/Agentic.Cli/agentic.db
+/Agentic.Cli/agentic.db-shm
+/Agentic.Cli/agentic.db-wal
