@@ -10,16 +10,21 @@ namespace Agentic;
 public sealed class ToolDefinition
 {
     /// <summary>The tool type discriminator. Defaults to <c>"mcp"</c>.</summary>
-    [JsonPropertyName("type")]          public string Type { get; set; } = "mcp";
+    [JsonPropertyName("type")] 
+    public string Type { get; set; } = "mcp";
+
     /// <summary>A short label identifying this MCP server to the model.</summary>
     [JsonPropertyName("server_label"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? ServerLabel { get; set; }
+
     /// <summary>The base URL of the MCP server (e.g. <c>http://localhost:5100/mcp</c>).</summary>
     [JsonPropertyName("server_url"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? ServerUrl { get; set; }
+
     /// <summary>Optional allow-list of tool names exposed to the model. <c>null</c> means all tools.</summary>
     [JsonPropertyName("allowed_tools"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public List<string>? AllowedTools { get; set; }
+
     /// <summary>Optional HTTP headers forwarded to the MCP server on every request.</summary>
     [JsonPropertyName("headers"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public Dictionary<string, string>? Headers { get; set; }
@@ -36,21 +41,46 @@ public sealed class ToolDefinition
 /// <summary>Request body sent to the <c>/v1/responses</c> endpoint.</summary>
 public sealed class ResponseRequest
 {
-    [JsonPropertyName("model")]       public string Model { get; set; } = "";
-    [JsonPropertyName("input")]       public object Input { get; set; } = "";
+    [JsonPropertyName("model")]
+    public string Model { get; set; } = "";
+
+    [JsonPropertyName("input")]
+    public object Input { get; set; } = "";
+
     [JsonPropertyName("instructions"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? Instructions { get; set; }
+
     [JsonPropertyName("temperature"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public double Temperature { get; set; }
+
     [JsonPropertyName("previous_response_id"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? PreviousResponseId { get; set; }
+
     [JsonPropertyName("tools"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public List<ToolDefinition>? Tools { get; set; }
+
     [JsonPropertyName("reasoning"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public ReasoningConfig? Reasoning { get; set; }
+
+    [JsonPropertyName("top_p"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public double? TopP { get; set; }
+
+    [JsonPropertyName("top_k"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? TopK { get; set; }
+
+    [JsonPropertyName("min_p"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public double? MinP { get; set; }
+
+    [JsonPropertyName("presence_penalty"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public double? PresencePenalty { get; set; }
+
+    [JsonPropertyName("repetition_penalty"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public double? RepetitionPenalty { get; set; }
+
     /// <summary>Qwen thinking toggle: sent as <c>enable_thinking</c> in the request body.</summary>
     [JsonPropertyName("enable_thinking"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public bool? EnableThinking { get; set; }
+
     [JsonPropertyName("stream"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public bool Stream { get; set; }
 }
@@ -62,11 +92,47 @@ public sealed class ReasoningConfig
     [JsonPropertyName("effort")] public string Effort { get; set; } = "medium";
 }
 
-/// <summary>Controls Qwen-style chain-of-thought thinking for a single request or globally via <see cref="LMConfig"/>.</summary>
-public sealed class ThinkingConfig
+/// <summary>
+/// Reasoning effort applied to a single request, globally via <see cref="LMConfig"/>,
+/// or per-agent via <see cref="AgentOptions"/>.
+/// <para>
+/// <c>None</c> explicitly disables chain-of-thought thinking (<c>enable_thinking=false</c>).
+/// <c>Low</c>, <c>Medium</c>, and <c>High</c> enable it and forward the corresponding effort
+/// string to the model. A <c>null</c> at any level falls through to the next level in the
+/// hierarchy: per-call → agent → LM → server default.
+/// </para>
+/// </summary>
+public enum ReasoningEffort
 {
-    /// <summary>Whether to enable (<c>true</c>) or disable (<c>false</c>) thinking.</summary>
-    public bool Enabled { get; set; } = true;
+    /// <summary>Disable chain-of-thought thinking (<c>enable_thinking=false</c>).</summary>
+    None,
+    /// <summary>Low reasoning effort.</summary>
+    Low,
+    /// <summary>Medium reasoning effort.</summary>
+    Medium,
+    /// <summary>High reasoning effort (slower, more thorough).</summary>
+    High,
+}
+
+/// <summary>
+/// Sampling and penalty parameters for a single request, globally via <see cref="LMConfig"/>,
+/// or per-agent via <see cref="AgentOptions"/>.
+/// Unset properties fall through to the next level in the hierarchy: per-call → agent → LM → server default.
+/// </summary>
+public sealed class InferenceConfig
+{
+    /// <summary>Sampling temperature. Higher values produce more varied output.</summary>
+    public double? Temperature { get; set; }
+    /// <summary>Top-p (nucleus) sampling cutoff.</summary>
+    public double? TopP { get; set; }
+    /// <summary>Top-k sampling — limits the candidate token pool.</summary>
+    public int? TopK { get; set; }
+    /// <summary>Minimum probability threshold for token selection.</summary>
+    public double? MinP { get; set; }
+    /// <summary>Penalises tokens that have already appeared in the output.</summary>
+    public double? PresencePenalty { get; set; }
+    /// <summary>Multiplier applied to logits of previously-seen tokens.</summary>
+    public double? RepetitionPenalty { get; set; }
 }
 
 /// <summary>A typed content block within a <see cref="ResponseOutputItem"/> (e.g. <c>output_text</c>).</summary>

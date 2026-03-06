@@ -21,11 +21,17 @@ public class LMConfig
     /// <summary>Model identifier used for embedding requests. Required when calling <see cref="LM.EmbedAsync"/> or <see cref="LM.EmbedBatchAsync"/>.</summary>
     public string? EmbeddingModel { get; set; }
     /// <summary>
-    /// Default thinking configuration applied to every <c>/v1/responses</c> call.
-    /// Can be overridden per-call or per-agent via <see cref="AgentOptions.Thinking"/>.
-    /// <c>null</c> = omit the flag entirely (server default).
+    /// Default reasoning effort applied to every <c>/v1/responses</c> call.
+    /// Can be overridden per-call or per-agent via <see cref="AgentOptions.Reasoning"/>.
+    /// <c>null</c> = server default.
     /// </summary>
-    public ThinkingConfig? Thinking { get; set; }
+    public ReasoningEffort? Reasoning { get; set; }
+    /// <summary>
+    /// Default inference parameters applied to every <c>/v1/responses</c> call.
+    /// Can be overridden per-call or per-agent via <see cref="AgentOptions.Inference"/>.
+    /// <c>null</c> = use server defaults.
+    /// </summary>
+    public InferenceConfig? Inference { get; set; }
     /// <summary>
     /// Named model aliases. Map a short key (e.g. <c>"advanced"</c>, <c>"ocr"</c>) to the full
     /// model identifier sent to the server. Resolved by <see cref="LM.ResolveModel"/>.
@@ -83,25 +89,25 @@ public sealed class LM : IDisposable
     /// <param name="input">User message text.</param>
     /// <param name="instructions">Optional system/instruction text.</param>
     /// <param name="previousResponseId">ID of the previous response for multi-turn chaining.</param>
-    /// <param name="temperature">Sampling temperature.</param>
+    /// <param name="inference">Inference parameter overrides; <c>null</c> falls back to <see cref="LMConfig.Inference"/>.</param>
     /// <param name="tools">Tool definitions (e.g. MCP servers) available to the model.</param>
-    /// <param name="reasoning">Optional reasoning configuration.</param>
-    /// <param name="thinking">Qwen thinking override; <c>null</c> falls back to <see cref="LMConfig.Thinking"/>.</param>
+    /// <param name="reasoning">Reasoning effort override; <c>null</c> falls back to <see cref="LMConfig.Reasoning"/>.</param>
     /// <param name="model">Model override. Accepts a named alias from <see cref="LMConfig.Models"/> or a literal model ID; <c>null</c> falls back to <see cref="LMConfig.ModelName"/>.</param>
     /// <param name="ct">Cancellation token.</param>
     public async Task<ResponseResponse> RespondAsync(
         string input, string? instructions = null, string? previousResponseId = null,
-        double temperature = 0, List<ToolDefinition>? tools = null,
-        ReasoningConfig? reasoning = null, ThinkingConfig? thinking = null,
+        InferenceConfig? inference = null, List<ToolDefinition>? tools = null,
+        ReasoningEffort? reasoning = null,
         string? model = null, CancellationToken ct = default)
     {
         var req = new ResponseRequest
         {
             Model = ResolveModel(model), Input = input, Instructions = instructions,
-            PreviousResponseId = previousResponseId, Temperature = temperature,
-            Tools = tools, Reasoning = reasoning,
+            PreviousResponseId = previousResponseId,
+            Tools = tools,
         };
-        ApplyThinking(req, thinking ?? _config.Thinking);
+        ApplyInference(req, inference ?? _config.Inference);
+        ApplyReasoning(req, reasoning ?? _config.Reasoning);
         return await PostAsync<ResponseRequest, ResponseResponse>("/v1/responses", req, ct);
     }
 
@@ -109,25 +115,25 @@ public sealed class LM : IDisposable
     /// <param name="input">Ordered list of conversation turns to replay.</param>
     /// <param name="instructions">Optional system/instruction text.</param>
     /// <param name="previousResponseId">ID of the previous response for multi-turn chaining.</param>
-    /// <param name="temperature">Sampling temperature.</param>
+    /// <param name="inference">Inference parameter overrides; <c>null</c> falls back to <see cref="LMConfig.Inference"/>.</param>
     /// <param name="tools">Tool definitions available to the model.</param>
-    /// <param name="reasoning">Optional reasoning configuration.</param>
-    /// <param name="thinking">Qwen thinking override; <c>null</c> falls back to <see cref="LMConfig.Thinking"/>.</param>
+    /// <param name="reasoning">Reasoning effort override; <c>null</c> falls back to <see cref="LMConfig.Reasoning"/>.</param>
     /// <param name="model">Model override. Accepts a named alias from <see cref="LMConfig.Models"/> or a literal model ID; <c>null</c> falls back to <see cref="LMConfig.ModelName"/>.</param>
     /// <param name="ct">Cancellation token.</param>
     public async Task<ResponseResponse> RespondAsync(
         IEnumerable<ResponseInput> input, string? instructions = null, string? previousResponseId = null,
-        double temperature = 0, List<ToolDefinition>? tools = null,
-        ReasoningConfig? reasoning = null, ThinkingConfig? thinking = null,
+        InferenceConfig? inference = null, List<ToolDefinition>? tools = null,
+        ReasoningEffort? reasoning = null,
         string? model = null, CancellationToken ct = default)
     {
         var req = new ResponseRequest
         {
             Model = ResolveModel(model), Input = input.ToList(), Instructions = instructions,
-            PreviousResponseId = previousResponseId, Temperature = temperature,
-            Tools = tools, Reasoning = reasoning,
+            PreviousResponseId = previousResponseId,
+            Tools = tools,
         };
-        ApplyThinking(req, thinking ?? _config.Thinking);
+        ApplyInference(req, inference ?? _config.Inference);
+        ApplyReasoning(req, reasoning ?? _config.Reasoning);
         return await PostAsync<ResponseRequest, ResponseResponse>("/v1/responses", req, ct);
     }
 
@@ -135,26 +141,26 @@ public sealed class LM : IDisposable
     /// <param name="input">User message text.</param>
     /// <param name="instructions">Optional system/instruction text.</param>
     /// <param name="previousResponseId">ID of the previous response for multi-turn chaining.</param>
-    /// <param name="temperature">Sampling temperature.</param>
+    /// <param name="inference">Inference parameter overrides; <c>null</c> falls back to <see cref="LMConfig.Inference"/>.</param>
     /// <param name="tools">Tool definitions available to the model.</param>
-    /// <param name="reasoning">Optional reasoning configuration.</param>
-    /// <param name="thinking">Qwen thinking override; <c>null</c> falls back to <see cref="LMConfig.Thinking"/>.</param>
+    /// <param name="reasoning">Reasoning effort override; <c>null</c> falls back to <see cref="LMConfig.Reasoning"/>.</param>
     /// <param name="model">Model override. Accepts a named alias from <see cref="LMConfig.Models"/> or a literal model ID; <c>null</c> falls back to <see cref="LMConfig.ModelName"/>.</param>
     /// <param name="ct">Cancellation token.</param>
     public async IAsyncEnumerable<StreamEvent> RespondStreamingAsync(
         string input, string? instructions = null, string? previousResponseId = null,
-        double temperature = 0, List<ToolDefinition>? tools = null,
-        ReasoningConfig? reasoning = null, ThinkingConfig? thinking = null,
+        InferenceConfig? inference = null, List<ToolDefinition>? tools = null,
+        ReasoningEffort? reasoning = null,
         string? model = null,
         [EnumeratorCancellation] CancellationToken ct = default)
     {
         var request = new ResponseRequest
         {
             Model = ResolveModel(model), Input = input, Instructions = instructions,
-            PreviousResponseId = previousResponseId, Temperature = temperature,
-            Tools = tools, Reasoning = reasoning, Stream = true,
+            PreviousResponseId = previousResponseId,
+            Tools = tools, Stream = true,
         };
-        ApplyThinking(request, thinking ?? _config.Thinking);
+        ApplyInference(request, inference ?? _config.Inference);
+        ApplyReasoning(request, reasoning ?? _config.Reasoning);
 
         await foreach (var ev in StreamRequestAsync(request, ct)) yield return ev;
     }
@@ -163,17 +169,16 @@ public sealed class LM : IDisposable
     /// <param name="input">Ordered list of conversation turns to replay.</param>
     /// <param name="instructions">Optional system/instruction text.</param>
     /// <param name="previousResponseId">ID of the previous response for multi-turn chaining.</param>
-    /// <param name="temperature">Sampling temperature.</param>
+    /// <param name="inference">Inference parameter overrides; <c>null</c> falls back to <see cref="LMConfig.Inference"/>.</param>
     /// <param name="tools">Tool definitions available to the model.</param>
-    /// <param name="reasoning">Optional reasoning configuration.</param>
-    /// <param name="thinking">Qwen thinking override; <c>null</c> falls back to <see cref="LMConfig.Thinking"/>.</param>
+    /// <param name="reasoning">Reasoning effort override; <c>null</c> falls back to <see cref="LMConfig.Reasoning"/>.</param>
     /// <param name="model">Model override. Accepts a named alias from <see cref="LMConfig.Models"/> or a literal model ID; <c>null</c> falls back to <see cref="LMConfig.ModelName"/>.</param>
     /// <param name="ct">Cancellation token.</param>
     public async IAsyncEnumerable<StreamEvent> RespondStreamingAsync(
         IEnumerable<ResponseInput> input, string? instructions = null,
         string? previousResponseId = null,
-        double temperature = 0, List<ToolDefinition>? tools = null,
-        ReasoningConfig? reasoning = null, ThinkingConfig? thinking = null,
+        InferenceConfig? inference = null, List<ToolDefinition>? tools = null,
+        ReasoningEffort? reasoning = null,
         string? model = null,
         [EnumeratorCancellation] CancellationToken ct = default)
     {
@@ -181,9 +186,10 @@ public sealed class LM : IDisposable
         {
             Model = ResolveModel(model), Input = input.ToList(), Instructions = instructions,
             PreviousResponseId = previousResponseId,
-            Temperature = temperature, Tools = tools, Reasoning = reasoning, Stream = true,
+            Tools = tools, Stream = true,
         };
-        ApplyThinking(request, thinking ?? _config.Thinking);
+        ApplyInference(request, inference ?? _config.Inference);
+        ApplyReasoning(request, reasoning ?? _config.Reasoning);
 
         await foreach (var ev in StreamRequestAsync(request, ct)) yield return ev;
     }
@@ -310,10 +316,30 @@ public sealed class LM : IDisposable
         catch { return false; }
     }
 
-    private static void ApplyThinking(ResponseRequest request, ThinkingConfig? thinking)
+    private static void ApplyInference(ResponseRequest request, InferenceConfig? inference)
     {
-        if (thinking is null) return;
-        request.EnableThinking = thinking.Enabled;
+        if (inference is null) return;
+        if (inference.Temperature.HasValue)       request.Temperature       = inference.Temperature.Value;
+        if (inference.TopP.HasValue)              request.TopP              = inference.TopP;
+        if (inference.TopK.HasValue)              request.TopK              = inference.TopK;
+        if (inference.MinP.HasValue)              request.MinP              = inference.MinP;
+        if (inference.PresencePenalty.HasValue)   request.PresencePenalty   = inference.PresencePenalty;
+        if (inference.RepetitionPenalty.HasValue) request.RepetitionPenalty = inference.RepetitionPenalty;
+    }
+
+    private static void ApplyReasoning(ResponseRequest request, ReasoningEffort? reasoning)
+    {
+        if (reasoning is null) return;
+        if (reasoning == ReasoningEffort.None)
+        {
+            request.EnableThinking = false;
+            request.Reasoning      = null;
+        }
+        else
+        {
+            request.EnableThinking = true;
+            request.Reasoning      = new ReasoningConfig { Effort = reasoning.Value.ToString().ToLowerInvariant() };
+        }
     }
 
     /// <summary>

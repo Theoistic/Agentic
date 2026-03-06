@@ -53,17 +53,20 @@ public sealed class AgentOptions
 {
     /// <summary>System prompt prepended to every request. <c>null</c> means no system instruction.</summary>
     public string? SystemPrompt { get; set; }
-    /// <summary>Sampling temperature (0 = deterministic). Passed directly to the model.</summary>
-    public double Temperature { get; set; }
+    /// <summary>
+    /// Inference parameters (temperature, top-p, top-k, etc.) for every call made by this agent.
+    /// Overrides <see cref="LMConfig.Inference"/> when set; <c>null</c> falls back to the LM-level default.
+    /// </summary>
+    public InferenceConfig? Inference { get; set; }
     /// <summary>Callback invoked for every <see cref="AgentEvent"/> during a turn.</summary>
     public Action<AgentEvent>? OnEvent { get; set; }
     /// <summary>Enables context compaction. <c>null</c> = compaction disabled.</summary>
     public CompactionOptions? Compaction { get; set; }
     /// <summary>
-    /// Qwen thinking override for every call made by this agent.
-    /// Overrides <see cref="LMConfig.Thinking"/> when set; <c>null</c> falls back to the LM-level default.
+    /// Reasoning effort for every call made by this agent.
+    /// Overrides <see cref="LMConfig.Reasoning"/> when set; <c>null</c> falls back to the LM-level default.
     /// </summary>
-    public ThinkingConfig? Thinking { get; set; }
+    public ReasoningEffort? Reasoning { get; set; }
     /// <summary>
     /// Agent-level model override. Accepts a named alias from <see cref="LMConfig.Models"/> or a literal
     /// model ID. <c>null</c> falls back to <see cref="LMConfig.ModelName"/>.

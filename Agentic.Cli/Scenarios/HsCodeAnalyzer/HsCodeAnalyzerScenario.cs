@@ -46,7 +46,7 @@ public class ImageTools(LM lm) : IAgentToolSet
         try
         {
             var dataUrl = await ToDataUrlAsync(imageUrl);
-            var resp    = await lm.RespondAsync([ResponseInput.User(prompt, [dataUrl])], thinking: new ThinkingConfig { Enabled = false });
+            var resp    = await lm.RespondAsync([ResponseInput.User(prompt, [dataUrl])], reasoning: ReasoningEffort.None);
             return ExtractText(resp) is { Length: > 0 } t ? t : "(no response)";
         }
         catch (Exception ex) { return $"Failed to analyse image: {ex.Message}"; }
@@ -276,7 +276,7 @@ public sealed class HsCodeAnalyzerScenario : IScenario
         {
             SystemPrompt = SystemPrompt,
             Compaction   = new CompactionOptions(),
-            Thinking     = new ThinkingConfig { Enabled = false },
+            Reasoning    = ReasoningEffort.None,
         });
 
         await new AgenticRepl(agent, mcpUrl).RunAsync();

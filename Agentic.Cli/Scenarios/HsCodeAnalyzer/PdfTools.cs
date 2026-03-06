@@ -47,7 +47,7 @@ public class PdfTools(LM lm) : IAgentToolSet
             var (dataUrl, savePath) = RenderPageToDataUrl(local, pageIndex);
             var resp               = await lm.RespondAsync(
                     [ResponseInput.User(prompt, [dataUrl])],
-                    thinking: new ThinkingConfig { Enabled = false });
+                    reasoning: ReasoningEffort.None);
 
             var text = ExtractText(resp);
             return text.Length > 0
