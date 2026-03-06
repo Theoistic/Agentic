@@ -67,6 +67,12 @@ plugins:
   - jekyll-seo-tag
   - jekyll-github-metadata
 
+defaults:
+  - scope:
+      path: ""
+    values:
+      layout: default
+
 kramdown:
   syntax_highlighter_opts:
     block:
