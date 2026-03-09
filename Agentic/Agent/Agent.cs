@@ -1,6 +1,7 @@
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
+using Microsoft.Extensions.Logging;
 
 namespace Agentic;
 
@@ -80,9 +81,11 @@ public sealed class Agent : IAsyncDisposable
         Emit(AgentEventKind.UserInput, text: input);
         var effectiveModel     = model ?? Options.Model;
         var effectiveInference = inference ?? Options.Inference;
+        var tools              = new List<ToolDefinition> { ToolDefinition.Mcp(serverLabel ?? "agentic", mcpServerUrl, allowedTools, mcpHeaders) };
+        EmitRequestContext(Options.SystemPrompt, tools);
         var resp = await _lm.RespondAsync(input,
             instructions: Options.SystemPrompt, inference: effectiveInference,
-            tools: [ToolDefinition.Mcp(serverLabel ?? "agentic", mcpServerUrl, allowedTools, mcpHeaders)],
+            tools: tools,
             reasoning: reasoning ?? Options.Reasoning, model: effectiveModel, ct: ct);
         return ParseOutput(resp);
     }
@@ -107,9 +110,11 @@ public sealed class Agent : IAsyncDisposable
         Emit(AgentEventKind.UserInput, text: text);
         var effectiveModel     = model ?? Options.Model;
         var effectiveInference = inference ?? Options.Inference;
+        var tools              = new List<ToolDefinition> { ToolDefinition.Mcp(serverLabel ?? "agentic", mcpServerUrl, allowedTools, mcpHeaders) };
+        EmitRequestContext(Options.SystemPrompt, tools);
         var resp = await _lm.RespondAsync([ResponseInput.User(text, images)],
             instructions: Options.SystemPrompt, inference: effectiveInference,
-            tools: [ToolDefinition.Mcp(serverLabel ?? "agentic", mcpServerUrl, allowedTools, mcpHeaders)],
+            tools: tools,
             reasoning: reasoning ?? Options.Reasoning, model: effectiveModel, ct: ct);
         return ParseOutput(resp);
     }
@@ -138,6 +143,7 @@ public sealed class Agent : IAsyncDisposable
         var effectiveReasoning = reasoning ?? Options.Reasoning;
         var effectiveModel     = model ?? Options.Model;
         var effectiveInference = inference ?? Options.Inference;
+        EmitRequestContext(instructions, tools);
 
         ResponseResponse resp;
         if (Context is not null && _lastResponseId is null && Context.IsCheckpointed)
@@ -187,6 +193,7 @@ public sealed class Agent : IAsyncDisposable
         var effectiveModel     = model ?? Options.Model;
         var effectiveInference = inference ?? Options.Inference;
         var userInput          = ResponseInput.User(text, images);
+        EmitRequestContext(instructions, tools);
 
         ResponseResponse resp;
         if (Context is not null && _lastResponseId is null && Context.IsCheckpointed)
@@ -229,9 +236,11 @@ public sealed class Agent : IAsyncDisposable
         Emit(AgentEventKind.UserInput, text: input);
         var effectiveModel     = model ?? Options.Model;
         var effectiveInference = inference ?? Options.Inference;
+        var tools              = new List<ToolDefinition> { ToolDefinition.Mcp(serverLabel ?? "agentic", mcpServerUrl, allowedTools, mcpHeaders) };
+        EmitRequestContext(Options.SystemPrompt, tools);
         return await ConsumeStreamAsync(_lm.RespondStreamingAsync(input,
             instructions: Options.SystemPrompt, inference: effectiveInference,
-            tools: [ToolDefinition.Mcp(serverLabel ?? "agentic", mcpServerUrl, allowedTools, mcpHeaders)],
+            tools: tools,
             reasoning: reasoning ?? Options.Reasoning, model: effectiveModel, ct: ct));
     }
 
@@ -255,9 +264,11 @@ public sealed class Agent : IAsyncDisposable
         Emit(AgentEventKind.UserInput, text: text);
         var effectiveModel     = model ?? Options.Model;
         var effectiveInference = inference ?? Options.Inference;
+        var tools              = new List<ToolDefinition> { ToolDefinition.Mcp(serverLabel ?? "agentic", mcpServerUrl, allowedTools, mcpHeaders) };
+        EmitRequestContext(Options.SystemPrompt, tools);
         return await ConsumeStreamAsync(_lm.RespondStreamingAsync([ResponseInput.User(text, images)],
             instructions: Options.SystemPrompt, inference: effectiveInference,
-            tools: [ToolDefinition.Mcp(serverLabel ?? "agentic", mcpServerUrl, allowedTools, mcpHeaders)],
+            tools: tools,
             reasoning: reasoning ?? Options.Reasoning, model: effectiveModel, ct: ct));
     }
 
@@ -285,6 +296,7 @@ public sealed class Agent : IAsyncDisposable
         var effectiveReasoning = reasoning ?? Options.Reasoning;
         var effectiveModel     = model ?? Options.Model;
         var effectiveInference = inference ?? Options.Inference;
+        EmitRequestContext(instructions, tools);
 
         AgentResponse response;
         if (Context is not null && _lastResponseId is null && Context.IsCheckpointed)
@@ -333,6 +345,7 @@ public sealed class Agent : IAsyncDisposable
         var effectiveModel     = model ?? Options.Model;
         var effectiveInference = inference ?? Options.Inference;
         var userInput          = ResponseInput.User(text, images);
+        EmitRequestContext(instructions, tools);
 
         AgentResponse response;
         if (Context is not null && _lastResponseId is null && Context.IsCheckpointed)
@@ -390,6 +403,7 @@ public sealed class Agent : IAsyncDisposable
         var effectiveReasoning = reasoning ?? Options.Reasoning;
         var effectiveModel     = model ?? Options.Model;
         var effectiveInference = inference ?? Options.Inference;
+        EmitRequestContext(systemPrompt, mcpTools);
 
         for (int round = 0; round < maxRounds; round++)
         {
@@ -522,9 +536,9 @@ public sealed class Agent : IAsyncDisposable
         }
 
         var fullText = textBuilder.ToString();
-        Options.OnEvent?.Invoke(new()
+        EmitCore(new()
         {
-            Kind = AgentEventKind.Answer, Text = fullText,
+            Kind         = AgentEventKind.Answer, Text = fullText,
             InputTokens  = usage?.InputTokens,
             OutputTokens = usage?.OutputTokens,
             TotalTokens  = usage?.TotalTokens,
@@ -583,7 +597,72 @@ public sealed class Agent : IAsyncDisposable
     }
 
     private void Emit(AgentEventKind kind, string? text = null, string? toolName = null, string? args = null)
-        => Options.OnEvent?.Invoke(new() { Kind = kind, Text = text, ToolName = toolName, Arguments = args });
+        => EmitCore(new() { Kind = kind, Text = text, ToolName = toolName, Arguments = args });
+
+    private void EmitCore(AgentEvent e)
+    {
+        Options.OnEvent?.Invoke(e);
+        LogEvent(e);
+    }
+
+    private void EmitRequestContext(string? instructions, List<ToolDefinition> tools)
+    {
+        if (!string.IsNullOrEmpty(instructions))
+            EmitCore(new() { Kind = AgentEventKind.SystemPrompt, Text = instructions });
+        foreach (var t in tools)
+            EmitCore(new()
+            {
+                Kind         = AgentEventKind.ToolDeclaration,
+                ServerLabel  = t.ServerLabel,
+                ServerUrl    = t.ServerUrl,
+                AllowedTools = t.AllowedTools,
+                Text         = t.AllowedTools is { Count: > 0 } ? string.Join(", ", t.AllowedTools) : "all tools",
+            });
+    }
+
+    private void LogEvent(AgentEvent e)
+    {
+        if (Options.Logger is null) return;
+        switch (e.Kind)
+        {
+            case AgentEventKind.UserInput:
+                Options.Logger.LogInformation("USER: {Text}", e.Text);
+                break;
+            case AgentEventKind.SystemPrompt:
+                Options.Logger.LogDebug("SYSTEM_PROMPT:\n{Text}", e.Text);
+                break;
+            case AgentEventKind.ToolDeclaration:
+                Options.Logger.LogDebug("TOOL_SERVER: {Label} -> {Url}  allowed=[{AllowedTools}]",
+                    e.ServerLabel, e.ServerUrl,
+                    e.AllowedTools is { Count: > 0 } ? string.Join(", ", e.AllowedTools) : "all");
+                break;
+            case AgentEventKind.ToolCall:
+                Options.Logger.LogInformation("TOOL_CALL: {Tool}\n{Args}", e.ToolName, e.Arguments);
+                break;
+            case AgentEventKind.ToolResult:
+                Options.Logger.LogInformation("TOOL_RESULT: {Tool}\n{Text}", e.ToolName, e.Text);
+                break;
+            case AgentEventKind.Reasoning:
+                Options.Logger.LogDebug("THINKING:\n{Text}", e.Text);
+                break;
+            case AgentEventKind.Answer:
+                Options.Logger.LogInformation("ANSWER ({InputTokens}/{OutputTokens} tokens):\n{Text}",
+                    e.InputTokens, e.OutputTokens, e.Text);
+                break;
+            case AgentEventKind.StepCompleted:
+                Options.Logger.LogInformation("STEP_COMPLETED: {Step}", e.Text);
+                break;
+            case AgentEventKind.WorkflowCompleted:
+                Options.Logger.LogInformation("WORKFLOW_COMPLETED: {Workflow}", e.Text);
+                break;
+            case AgentEventKind.Compacted:
+                Options.Logger.LogInformation("COMPACTED: {Summary}", e.Text);
+                break;
+            case AgentEventKind.TextDelta:
+                Options.Logger.LogTrace("DELTA: {Text}", e.Text);
+                break;
+        }
+    }
 
     /// <summary>
     /// MCP tool output arrives as a JSON content array: [{"type":"text","text":"..."}].

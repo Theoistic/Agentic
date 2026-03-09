@@ -178,6 +178,15 @@ public sealed class ResponseResponse
     [JsonPropertyName("output")]      public List<ResponseOutputItem> Output { get; set; } = [];
     [JsonPropertyName("response_id")] public string? ResponseId { get; set; }
     [JsonPropertyName("usage")]       public ResponseUsage? Usage { get; set; }
+
+    /// <summary>Concatenates all <c>output_text</c> content from <c>message</c> output items.</summary>
+    [JsonIgnore]
+    public string Text => string.Concat(
+        Output
+            .Where(i => i.Type == "message")
+            .SelectMany(i => i.Content ?? [])
+            .Where(p => p.Type == "output_text")
+            .Select(p => p.Text ?? ""));
 }
 
 /// <summary>A single Server-Sent Event (SSE) emitted during a streaming <c>/v1/responses</c> request.</summary>

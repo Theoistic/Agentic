@@ -1,3 +1,5 @@
+using Microsoft.Extensions.Logging;
+
 namespace Agentic;
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -9,6 +11,10 @@ public enum AgentEventKind
 {
     /// <summary>The user's input message was recorded.</summary>
     UserInput,
+    /// <summary>The effective system prompt / instructions were dispatched to the model.</summary>
+    SystemPrompt,
+    /// <summary>An MCP tool server was declared for this request.</summary>
+    ToolDeclaration,
     /// <summary>The model emitted an intermediate reasoning / thinking chunk.</summary>
     Reasoning,
     /// <summary>A streaming text delta arrived from the model.</summary>
@@ -27,7 +33,7 @@ public enum AgentEventKind
     Compacted
 }
 
-/// <summary>An event raised by the <see cref="Agent"/> and delivered to <see cref="AgentOptions.OnEvent"/>.</summary>
+/// <summary>An event raised by the <see cref="Agent"/> and delivered to <see cref="AgentOptions.OnEvent"/> and <see cref="AgentOptions.Logger"/>.</summary>
 public sealed class AgentEvent
 {
     /// <summary>The kind of event that occurred.</summary>
@@ -36,7 +42,7 @@ public sealed class AgentEvent
     public string? ToolName { get; init; }
     /// <summary>JSON-encoded tool arguments (set for <see cref="AgentEventKind.ToolCall"/>).</summary>
     public string? Arguments { get; init; }
-    /// <summary>Text payload — delta text, tool result, answer, or compaction summary depending on <see cref="Kind"/>.</summary>
+    /// <summary>Text payload — delta text, tool result, answer, system prompt, or compaction summary depending on <see cref="Kind"/>.</summary>
     public string? Text { get; init; }
     /// <summary>The turn index within the current conversation.</summary>
     public int Round { get; init; }
@@ -46,6 +52,12 @@ public sealed class AgentEvent
     public int? OutputTokens { get; init; }
     /// <summary>Total token count (see <see cref="InputTokens"/>).</summary>
     public int? TotalTokens { get; init; }
+    /// <summary>MCP server label (set for <see cref="AgentEventKind.ToolDeclaration"/>).</summary>
+    public string? ServerLabel { get; init; }
+    /// <summary>MCP server URL (set for <see cref="AgentEventKind.ToolDeclaration"/>).</summary>
+    public string? ServerUrl { get; init; }
+    /// <summary>Allowed tool names for this server (set for <see cref="AgentEventKind.ToolDeclaration"/>; <c>null</c> = all tools).</summary>
+    public IReadOnlyList<string>? AllowedTools { get; init; }
 }
 
 /// <summary>Configuration options for an <see cref="Agent"/> instance.</summary>
@@ -73,6 +85,13 @@ public sealed class AgentOptions
     /// Overridable per-call via the <c>model</c> parameter on each agent method.
     /// </summary>
     public string? Model { get; set; }
+    /// <summary>
+    /// Optional logger. When set, every <see cref="AgentEvent"/> is automatically written using structured
+    /// log messages — no manual <see cref="OnEvent"/> switch required.
+    /// <see cref="AgentEventKind.TextDelta"/> is written at <c>Trace</c> level; all others at <c>Debug</c>
+    /// or <c>Information</c> level so standard log-level filters keep the output clean.
+    /// </summary>
+    public ILogger? Logger { get; set; }
 }
 
 /// <summary>Records a single tool call that was executed during an agent turn.</summary>
