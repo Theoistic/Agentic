@@ -364,3 +364,9 @@ FodyWeavers.xsd
 /Agentic.Cli/agentic.db
 /Agentic.Cli/agentic.db-shm
 /Agentic.Cli/agentic.db-wal
+
+# Jekyll build output
+docs/_site/
+docs/.jekyll-cache/
+docs/.jekyll-metadata
+docs/Gemfile.lock

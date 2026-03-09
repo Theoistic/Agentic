@@ -455,7 +455,7 @@ public sealed class HsCodeAnalyzerScenario : IScenario
         {
             SystemPrompt = SystemPrompt,
             Compaction   = new CompactionOptions(),
-            Thinking     = new ThinkingConfig { Enabled = false },
+            Reasoning    = ReasoningEffort.None,
         });
 
         await new AgenticRepl(agent, mcpUrl).RunAsync();

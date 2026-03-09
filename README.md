@@ -187,17 +187,24 @@ foreach (var r in results)
 | Property | Default | Description |
 |----------|---------|-------------|
 | `SystemPrompt` | `null` | Instruction text prepended to every request |
-| `Temperature` | `0` | Sampling temperature |
 | `OnEvent` | `null` | Callback fired for every `AgentEvent` |
 | `Compaction` | `null` | Enable context compaction (see above) |
-| `Thinking` | `null` | Per-agent thinking default (see [Thinking Control](#thinking-control)) |
+| `Reasoning` | `null` | Per-agent reasoning effort (see [Reasoning Control](#reasoning-control)) |
+| `Inference` | `null` | Per-agent sampling parameters (see [Inference Config](#inference-config)) |
 | `Model` | `null` | Per-agent model default (see [Model Selection](#model-selection)) |
 
 ---
 
-## Thinking Control
+## Reasoning Control
 
-For models that support chain-of-thought reasoning (e.g. Qwen3), you can toggle thinking on or off at three levels. Each level overrides the one above it.
+For models that support chain-of-thought reasoning (e.g. Qwen3), you can control the reasoning effort at three levels. Each level overrides the one above it.
+
+| Value | Behaviour |
+|-------|-----------|
+| `None` | Disables chain-of-thought thinking (`enable_thinking=false`) |
+| `Low` | Enables thinking with low effort |
+| `Medium` | Enables thinking with medium effort |
+| `High` | Enables thinking with high effort (slower, more thorough) |
 
 ### 1 — Global default (LMConfig)
 
@@ -208,47 +215,104 @@ var lm = new LM(new LMConfig
 {
     Endpoint  = "http://localhost:1234",
     ModelName = "Qwen/Qwen3-30B-A3B",
-    Thinking  = new ThinkingConfig { Enabled = false },  // thinking off by default
+    Reasoning = ReasoningEffort.None,   // thinking off by default
 });
 ```
 
 ### 2 — Per-agent default (AgentOptions)
 
-Overrides the global `LMConfig.Thinking` for this agent only.
+Overrides the global `LMConfig.Reasoning` for this agent only.
 
 ```csharp
 var agent = new Agent(lm, new AgentOptions
 {
     SystemPrompt = "You are a helpful assistant.",
-    Thinking     = new ThinkingConfig { Enabled = true },  // override: thinking on for this agent
+    Reasoning    = ReasoningEffort.High,   // override: high reasoning for this agent
 });
 ```
 
 ### 3 — Per-request override
 
-Pass `thinking:` directly to any `Run*` / `Chat*` call. This takes precedence over both the agent and global defaults.
+Pass `reasoning:` to any `Run*` / `Chat*` call. This takes precedence over both the agent and global defaults.
 
 ```csharp
-// Thinking explicitly off for this one call
+// Reasoning off for a quick question
 var response = await agent.ChatStreamAsync(
     "Quick question — what is 2 + 2?",
     mcpServerUrl: "http://localhost:5100/mcp",
-    thinking: new ThinkingConfig { Enabled = false });
+    reasoning: ReasoningEffort.None);
 
-// Thinking explicitly on for this one call
+// High effort for a complex analysis
 var response = await agent.ChatStreamAsync(
     "Analyse the trade-offs of this architecture design.",
     mcpServerUrl: "http://localhost:5100/mcp",
-    thinking: new ThinkingConfig { Enabled = true });
+    reasoning: ReasoningEffort.High);
 ```
 
-> **Precedence:** per-request → per-agent (`AgentOptions.Thinking`) → global (`LMConfig.Thinking`) → not sent (model default).
+> **Precedence:** per-request → per-agent (`AgentOptions.Reasoning`) → global (`LMConfig.Reasoning`) → not sent (model default).
+
+---
+
+## Inference Config
+
+Sampling and penalty parameters are grouped in `InferenceConfig` and follow the same three-level override pattern. Only fields that are non-`null` are forwarded to the server; unset fields fall through to the next level.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `Temperature` | `double?` | Sampling temperature. Higher values produce more varied output |
+| `TopP` | `double?` | Top-p (nucleus) sampling cutoff |
+| `TopK` | `int?` | Top-k — limits the candidate token pool |
+| `MinP` | `double?` | Minimum probability threshold for token selection |
+| `PresencePenalty` | `double?` | Penalises tokens that have already appeared in the output |
+| `RepetitionPenalty` | `double?` | Multiplier applied to logits of previously-seen tokens |
+
+### 1 — Global default (LMConfig)
+
+```csharp
+var lm = new LM(new LMConfig
+{
+    Endpoint  = "http://localhost:1234",
+    ModelName = "your-model-name",
+    Inference = new InferenceConfig
+    {
+        Temperature       = 0.7,
+        TopP              = 0.8,
+        TopK              = 20,
+        MinP              = 0.0,
+        PresencePenalty   = 1.5,
+        RepetitionPenalty = 1.0,
+    },
+});
+```
+
+### 2 — Per-agent default (AgentOptions)
+
+```csharp
+var agent = new Agent(lm, new AgentOptions
+{
+    SystemPrompt = "You are a creative writer.",
+    Inference    = new InferenceConfig { Temperature = 1.2, RepetitionPenalty = 1.1 },
+});
+```
+
+### 3 — Per-request override
+
+Pass `inference:` to any `Run*` / `Chat*` call.
+
+```csharp
+var response = await agent.ChatStreamAsync(
+    "Write me a poem.",
+    mcpServerUrl: "http://localhost:5100/mcp",
+    inference: new InferenceConfig { Temperature = 1.5, TopP = 0.95 });
+```
+
+> **Precedence:** per-request → per-agent (`AgentOptions.Inference`) → global (`LMConfig.Inference`) → not sent (server default).
 
 ---
 
 ## Model Selection
 
-Agentic supports multiple named model aliases in a single `LM` instance. You define them once in `LMConfig.Models` and then reference them by key at the agent or per-call level — the same three-level override pattern used by [Thinking Control](#thinking-control).
+Agentic supports multiple named model aliases in a single `LM` instance. You define them once in `LMConfig.Models` and then reference them by key at the agent or per-call level — the same three-level override pattern used by [Reasoning Control](#reasoning-control).
 
 ### 1 — Define aliases in LMConfig
 
