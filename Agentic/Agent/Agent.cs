@@ -68,7 +68,7 @@ public sealed class Agent : IAsyncDisposable
     /// <param name="serverLabel">Optional label for the MCP server; defaults to <c>"agentic"</c>.</param>
     /// <param name="allowedTools">Optional allow-list of tool names; <c>null</c> means all tools.</param>
     /// <param name="mcpHeaders">Optional HTTP headers forwarded to the MCP server.</param>
-    /// <param name="thinking">Per-call reasoning effort override. Overrides <see cref="AgentOptions.Reasoning"/> when set.</param>
+    /// <param name="reasoning">Per-call reasoning effort override. Overrides <see cref="AgentOptions.Reasoning"/> when set.</param>
     /// <param name="inference">Per-call inference override. Overrides <see cref="AgentOptions.Inference"/> when set.</param>
     /// <param name="model">Per-call model override. Accepts a named alias from <see cref="LMConfig.Models"/> or a literal model ID; <c>null</c> falls back to <see cref="AgentOptions.Model"/> then <see cref="LMConfig.ModelName"/>.</param>
     /// <param name="ct">Cancellation token.</param>
@@ -97,7 +97,7 @@ public sealed class Agent : IAsyncDisposable
     /// <param name="serverLabel">Optional label for the MCP server; defaults to <c>"agentic"</c>.</param>
     /// <param name="allowedTools">Optional allow-list of tool names; <c>null</c> means all tools.</param>
     /// <param name="mcpHeaders">Optional HTTP headers forwarded to the MCP server.</param>
-    /// <param name="thinking">Per-call reasoning effort override. Overrides <see cref="AgentOptions.Reasoning"/> when set.</param>
+    /// <param name="reasoning">Per-call reasoning effort override. Overrides <see cref="AgentOptions.Reasoning"/> when set.</param>
     /// <param name="inference">Per-call inference override. Overrides <see cref="AgentOptions.Inference"/> when set.</param>
     /// <param name="model">Per-call model override. Accepts a named alias from <see cref="LMConfig.Models"/> or a literal model ID; <c>null</c> falls back to <see cref="AgentOptions.Model"/> then <see cref="LMConfig.ModelName"/>.</param>
     /// <param name="ct">Cancellation token.</param>
@@ -125,7 +125,7 @@ public sealed class Agent : IAsyncDisposable
     /// <param name="serverLabel">Optional label for the MCP server; defaults to <c>"agentic"</c>.</param>
     /// <param name="allowedTools">Optional allow-list of tool names; <c>null</c> means all tools.</param>
     /// <param name="mcpHeaders">Optional HTTP headers forwarded to the MCP server.</param>
-    /// <param name="thinking">Per-call reasoning effort override. Overrides <see cref="AgentOptions.Reasoning"/> when set.</param>
+    /// <param name="reasoning">Per-call reasoning effort override. Overrides <see cref="AgentOptions.Reasoning"/> when set.</param>
     /// <param name="inference">Per-call inference override. Overrides <see cref="AgentOptions.Inference"/> when set.</param>
     /// <param name="model">Per-call model override. Accepts a named alias from <see cref="LMConfig.Models"/> or a literal model ID; <c>null</c> falls back to <see cref="AgentOptions.Model"/> then <see cref="LMConfig.ModelName"/>.</param>
     /// <param name="ct">Cancellation token.</param>
@@ -174,7 +174,7 @@ public sealed class Agent : IAsyncDisposable
     /// <param name="serverLabel">Optional label for the MCP server; defaults to <c>"agentic"</c>.</param>
     /// <param name="allowedTools">Optional allow-list of tool names; <c>null</c> means all tools.</param>
     /// <param name="mcpHeaders">Optional HTTP headers forwarded to the MCP server.</param>
-    /// <param name="thinking">Per-call reasoning effort override. Overrides <see cref="AgentOptions.Reasoning"/> when set.</param>
+    /// <param name="reasoning">Per-call reasoning effort override. Overrides <see cref="AgentOptions.Reasoning"/> when set.</param>
     /// <param name="inference">Per-call inference override. Overrides <see cref="AgentOptions.Inference"/> when set.</param>
     /// <param name="model">Per-call model override. Accepts a named alias from <see cref="LMConfig.Models"/> or a literal model ID; <c>null</c> falls back to <see cref="AgentOptions.Model"/> then <see cref="LMConfig.ModelName"/>.</param>
     /// <param name="ct">Cancellation token.</param>
@@ -223,7 +223,7 @@ public sealed class Agent : IAsyncDisposable
     /// <param name="serverLabel">Optional label for the MCP server; defaults to <c>"agentic"</c>.</param>
     /// <param name="allowedTools">Optional allow-list of tool names; <c>null</c> means all tools.</param>
     /// <param name="mcpHeaders">Optional HTTP headers forwarded to the MCP server.</param>
-    /// <param name="thinking">Per-call reasoning effort override. Overrides <see cref="AgentOptions.Reasoning"/> when set.</param>
+    /// <param name="reasoning">Per-call reasoning effort override. Overrides <see cref="AgentOptions.Reasoning"/> when set.</param>
     /// <param name="inference">Per-call inference override. Overrides <see cref="AgentOptions.Inference"/> when set.</param>
     /// <param name="model">Per-call model override. Accepts a named alias from <see cref="LMConfig.Models"/> or a literal model ID; <c>null</c> falls back to <see cref="AgentOptions.Model"/> then <see cref="LMConfig.ModelName"/>.</param>
     /// <param name="ct">Cancellation token.</param>
@@ -251,7 +251,7 @@ public sealed class Agent : IAsyncDisposable
     /// <param name="serverLabel">Optional label for the MCP server; defaults to <c>"agentic"</c>.</param>
     /// <param name="allowedTools">Optional allow-list of tool names; <c>null</c> means all tools.</param>
     /// <param name="mcpHeaders">Optional HTTP headers forwarded to the MCP server.</param>
-    /// <param name="thinking">Per-call reasoning effort override. Overrides <see cref="AgentOptions.Reasoning"/> when set.</param>
+    /// <param name="reasoning">Per-call reasoning effort override. Overrides <see cref="AgentOptions.Reasoning"/> when set.</param>
     /// <param name="inference">Per-call inference override. Overrides <see cref="AgentOptions.Inference"/> when set.</param>
     /// <param name="model">Per-call model override. Accepts a named alias from <see cref="LMConfig.Models"/> or a literal model ID; <c>null</c> falls back to <see cref="AgentOptions.Model"/> then <see cref="LMConfig.ModelName"/>.</param>
     /// <param name="ct">Cancellation token.</param>
@@ -278,7 +278,7 @@ public sealed class Agent : IAsyncDisposable
     /// <param name="serverLabel">Optional label for the MCP server; defaults to <c>"agentic"</c>.</param>
     /// <param name="allowedTools">Optional allow-list of tool names; <c>null</c> means all tools.</param>
     /// <param name="mcpHeaders">Optional HTTP headers forwarded to the MCP server.</param>
-    /// <param name="thinking">Per-call reasoning effort override. Overrides <see cref="AgentOptions.Reasoning"/> when set.</param>
+    /// <param name="reasoning">Per-call reasoning effort override. Overrides <see cref="AgentOptions.Reasoning"/> when set.</param>
     /// <param name="inference">Per-call inference override. Overrides <see cref="AgentOptions.Inference"/> when set.</param>
     /// <param name="model">Per-call model override. Accepts a named alias from <see cref="LMConfig.Models"/> or a literal model ID; <c>null</c> falls back to <see cref="AgentOptions.Model"/> then <see cref="LMConfig.ModelName"/>.</param>
     /// <param name="ct">Cancellation token.</param>
@@ -326,7 +326,7 @@ public sealed class Agent : IAsyncDisposable
     /// <param name="serverLabel">Optional label for the MCP server; defaults to <c>"agentic"</c>.</param>
     /// <param name="allowedTools">Optional allow-list of tool names; <c>null</c> means all tools.</param>
     /// <param name="mcpHeaders">Optional HTTP headers forwarded to the MCP server.</param>
-    /// <param name="thinking">Per-call reasoning effort override. Overrides <see cref="AgentOptions.Reasoning"/> when set.</param>
+    /// <param name="reasoning">Per-call reasoning effort override. Overrides <see cref="AgentOptions.Reasoning"/> when set.</param>
     /// <param name="inference">Per-call inference override. Overrides <see cref="AgentOptions.Inference"/> when set.</param>
     /// <param name="model">Per-call model override. Accepts a named alias from <see cref="LMConfig.Models"/> or a literal model ID; <c>null</c> falls back to <see cref="AgentOptions.Model"/> then <see cref="LMConfig.ModelName"/>.</param>
     /// <param name="ct">Cancellation token.</param>
@@ -380,7 +380,7 @@ public sealed class Agent : IAsyncDisposable
     /// <param name="serverLabel">Optional label for the MCP server; defaults to <c>"agentic"</c>.</param>
     /// <param name="allowedTools">Optional allow-list of tool names; <c>null</c> means all tools.</param>
     /// <param name="mcpHeaders">Optional HTTP headers forwarded to the MCP server.</param>
-    /// <param name="thinking">Per-call reasoning effort override. Overrides <see cref="AgentOptions.Reasoning"/> when set.</param>
+    /// <param name="reasoning">Per-call reasoning effort override. Overrides <see cref="AgentOptions.Reasoning"/> when set.</param>
     /// <param name="inference">Per-call inference override. Overrides <see cref="AgentOptions.Inference"/> when set.</param>
     /// <param name="model">Per-call model override. Accepts a named alias from <see cref="LMConfig.Models"/> or a literal model ID; <c>null</c> falls back to <see cref="AgentOptions.Model"/> then <see cref="LMConfig.ModelName"/>.</param>
     /// <param name="maxRounds">Maximum number of model turns before the workflow is aborted.</param>

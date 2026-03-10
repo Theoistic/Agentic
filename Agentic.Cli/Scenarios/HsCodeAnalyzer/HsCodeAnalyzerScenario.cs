@@ -118,8 +118,7 @@ public class HsCodeAnalyzerTools(LM lm, ICollection<HSDescription> hs, TollInvoi
         {
             var local = await EnsureLocalAsync(pdfPath);
             var (dataUrl, savePath) = RenderPage(local, pageIndex);
-            var resp  = await lm.RespondAsync([ResponseInput.User(prompt, [dataUrl])],
-                            thinking: new ThinkingConfig { Enabled = false });
+            var resp  = await lm.RespondAsync([ResponseInput.User(prompt, [dataUrl])], reasoning: ReasoningEffort.None);
             var text  = ExtractText(resp);
             return text.Length > 0
                 ? $"[Page {pageIndex} · {savePath}]\n{text}"
@@ -139,8 +138,7 @@ public class HsCodeAnalyzerTools(LM lm, ICollection<HSDescription> hs, TollInvoi
         {
             var dataUrl = imageUrl.StartsWith("http", StringComparison.OrdinalIgnoreCase)
                 ? await FetchDataUrlAsync(imageUrl) : imageUrl;
-            var resp = await lm.RespondAsync([ResponseInput.User(prompt, [dataUrl])],
-                           thinking: new ThinkingConfig { Enabled = false });
+            var resp = await lm.RespondAsync([ResponseInput.User(prompt, [dataUrl])], reasoning: ReasoningEffort.None);
             return ExtractText(resp) is { Length: > 0 } t ? t : "(no response)";
         }
         catch (Exception ex) { return $"Failed to analyse image: {ex.Message}"; }
