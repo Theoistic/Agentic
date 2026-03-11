@@ -24,12 +24,12 @@ var workflow = new Workflow("Process Invoice")
     .Step(
         name:        "Extract header",
         instruction: "Extract the invoice number, date, vendor name, currency, and total amount.",
-        verify:      ctx => ctx.ToolInvocations.Any(t => t.ToolName == "save_invoice_header"))
+        verify:      ctx => ctx.ToolInvocations.Any(t => t.Name == "save_invoice_header"))
 
     .Step(
         name:        "Extract line items",
         instruction: "Extract every line item into the database.",
-        verify:      ctx => ctx.ToolInvocations.Any(t => t.ToolName == "save_invoice_lines"))
+        verify:      ctx => ctx.ToolInvocations.Any(t => t.Name == "save_invoice_lines"))
 
     .Step(
         name:        "Confirm totals",
@@ -88,11 +88,11 @@ Available inside a `verify` callback:
 
 ```csharp
 // Tool was called at least once
-verify: ctx => ctx.ToolInvocations.Any(t => t.ToolName == "save_data")
+verify: ctx => ctx.ToolInvocations.Any(t => t.Name == "save_data")
 
 // Tool was called with a specific argument value
 verify: ctx => ctx.ToolInvocations
-    .Any(t => t.ToolName == "save_data" && t.Arguments.Contains("\"status\":\"ok\""))
+    .Any(t => t.Name == "save_data" && t.Arguments.Contains("\"status\":\"ok\""))
 
 // Model confirmed something in its output
 verify: ctx => ctx.ResponseText.Contains("confirmed", StringComparison.OrdinalIgnoreCase)
@@ -114,12 +114,12 @@ var workflow = new Workflow("Document Intake")
     .Step(
         name:        "Classify document",
         instruction: "Identify the document type (invoice, contract, report, or other).",
-        verify:      ctx => ctx.ToolInvocations.Any(t => t.ToolName == "set_document_type"))
+        verify:      ctx => ctx.ToolInvocations.Any(t => t.Name == "set_document_type"))
 
     .Step(
         name:        "Extract key fields",
         instruction: "Extract all key metadata fields appropriate for this document type.",
-        verify:      ctx => ctx.ToolInvocations.Any(t => t.ToolName == "save_metadata"))
+        verify:      ctx => ctx.ToolInvocations.Any(t => t.Name == "save_metadata"))
 
     .Step(
         name:        "Generate summary",

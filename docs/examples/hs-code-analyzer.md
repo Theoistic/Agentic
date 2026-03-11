@@ -22,7 +22,7 @@ This scenario shows how to combine:
 ### PdfTools — Vision-based PDF reading
 
 ```csharp
-public class PdfTools(LM lm) : IAgentToolSet
+public class PdfTools(ILLMBackend lm) : IAgentToolSet
 {
     [Tool, Description(
         "Get the page count and basic info of a PDF. " +

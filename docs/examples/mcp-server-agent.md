@@ -28,7 +28,7 @@ app.MapMcpServer("/mcp");
 var tools = app.Services.GetRequiredService<ToolRegistry>();
 tools.Register(new WeatherTools());
 tools.Register(new DatabaseTools(app.Services.GetRequiredService<AppDbContext>()));
-tools.Register(new EmbeddingTools(app.Services.GetRequiredService<LM>()));
+tools.Register(new EmbeddingTools(app.Services.GetRequiredService<ILLMBackend>()));
 
 await app.RunAsync("http://0.0.0.0:5100");
 ```
@@ -37,7 +37,7 @@ await app.RunAsync("http://0.0.0.0:5100");
 
 ```csharp
 // Agent/Program.cs
-var lm = new LM(new LMConfig
+var lm = new OpenAIBackend(new LMConfig
 {
     Endpoint  = "http://localhost:1234",
     ModelName = "your-model-name",

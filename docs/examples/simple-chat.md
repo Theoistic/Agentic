@@ -15,7 +15,7 @@ A minimal conversational agent that streams responses to the console.
 using Agentic;
 
 // 1. Configure the LM client
-var lm = new LM(new LMConfig
+var lm = new OpenAIBackend(new LMConfig
 {
     Endpoint  = "http://localhost:1234",   // LM Studio or any OpenAI-compatible server
     ModelName = "your-model-name",
@@ -49,7 +49,7 @@ while (true)
 
 ## What it demonstrates
 
-- Creating an `LM` client pointing at a local model server
+- Creating an `OpenAIBackend` client pointing at a local model server
 - Creating an `Agent` with a system prompt
 - Streaming tokens to the console via the `OnEvent` callback
 - Multi-turn conversation (each `ChatStreamAsync` call appends to history)
