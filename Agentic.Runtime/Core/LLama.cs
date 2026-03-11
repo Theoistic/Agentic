@@ -853,6 +853,28 @@ public static class Llama
         // If your backend folder has mtmd-helper.dll, change this to "mtmd-helper".
         private const string MTMD_HELPER_LIB = "mtmd";
 
+        private static void LogDiagnostic(string message)
+        {
+            s_logger.Log(LogLevel.Debug, "vision", message);
+        }
+
+        private static int CountOccurrences(string text, string value)
+        {
+            if (string.IsNullOrEmpty(text) || string.IsNullOrEmpty(value))
+                return 0;
+
+            int count = 0;
+            int index = 0;
+
+            while ((index = text.IndexOf(value, index, StringComparison.Ordinal)) >= 0)
+            {
+                count++;
+                index += value.Length;
+            }
+
+            return count;
+        }
+
         public readonly struct Context
         {
             public readonly IntPtr Ptr;
@@ -1072,6 +1094,8 @@ public static class Llama
             if (bmp == IntPtr.Zero)
                 throw new InvalidOperationException("mtmd_helper_bitmap_init_from_buf returned null.");
 
+            LogDiagnostic($"bitmap decoded: bytes={bytes.Length}, ptr=0x{bmp.ToString("X")}");
+
             return new Bitmap(bmp);
         }
 
@@ -1101,6 +1125,7 @@ public static class Llama
 
             IntPtr textPtr = AllocUtf8(prompt);
             IntPtr chunks = IntPtr.Zero;
+            int promptMarkerCount = CountOccurrences(prompt, DefaultMarker);
 
             try
             {
@@ -1133,6 +1158,11 @@ public static class Llama
 
                 if (rc != 0)
                     throw new InvalidOperationException($"mtmd_tokenize failed with code {rc}.");
+
+                UIntPtr chunkTokens = mtmd_helper_get_n_tokens(chunks);
+                int chunkPos = mtmd_helper_get_n_pos(chunks);
+                LogDiagnostic(
+                    $"mtmd_tokenize ok: markers={promptMarkerCount}, bitmaps={bitmapPtrs.Length}, chunk_tokens={(ulong)chunkTokens}, chunk_pos={chunkPos}, add_special={addSpecial}, parse_special={parseSpecial}");
 
                 return new InputChunks(chunks);
             }
@@ -1185,6 +1215,9 @@ public static class Llama
 
             try
             {
+                int promptMarkerCount = CountOccurrences(prompt, DefaultMarker);
+                LogDiagnostic($"eval start: markers={promptMarkerCount}, images={base64Images.Count}, n_past={nPast}, n_batch={nBatch}, seq_id={seqId}");
+
                 foreach (string image in base64Images)
                     bitmaps.Add(CreateBitmapFromBase64(vision, image));
 
@@ -1195,6 +1228,7 @@ public static class Llama
                     throw new InvalidOperationException("mtmd produced zero positions for the input chunks.");
 
                 UIntPtr chunkTokens = mtmd_helper_get_n_tokens(chunks.Ptr);
+                LogDiagnostic($"eval chunks: chunk_tokens={(ulong)chunkTokens}, chunk_pos={chunkPos}, bitmaps={bitmaps.Count}");
 
                 int rc = mtmd_helper_eval_chunks(
                     vision.Ptr,
@@ -1211,6 +1245,7 @@ public static class Llama
                         $"mtmd_helper_eval_chunks failed with code {rc}. n_past={nPast}, chunk_pos={chunkPos}, chunk_tokens={(ulong)chunkTokens}, n_batch={nBatch}");
 
                 nPast = newNPast;
+                LogDiagnostic($"eval complete: new_n_past={newNPast}, chunk_tokens={(ulong)chunkTokens}, chunk_pos={chunkPos}");
             }
             finally
             {

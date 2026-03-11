@@ -3,7 +3,7 @@ using Agentic.Runtime.Core;
 using Docnet.Core;
 using Docnet.Core.Models;
 using SixLabors.ImageSharp;
-using SixLabors.ImageSharp.Formats.Jpeg;
+using SixLabors.ImageSharp.Formats.Png;
 using SixLabors.ImageSharp.PixelFormats;
 using SixLabors.ImageSharp.Processing;
 using Mantle = Agentic.Runtime.Mantle;
@@ -26,7 +26,7 @@ public sealed class MultiImageNativeBackendTests
     public void TestCleanup() { }
 
     /// <summary>
-    /// Renders every page of the bundled test invoice PDF to a JPEG data URL,
+    /// Renders every page of the bundled test invoice PDF to a PNG data URL,
     /// sends them all in a single vision request, and asserts the model returns
     /// a non-empty document analysis.
     /// Requires <c>AGENTIC_NATIVE_MODEL_PATH</c> to point to a vision-capable GGUF.
@@ -53,13 +53,16 @@ public sealed class MultiImageNativeBackendTests
         {
             ModelPath        = modelPath,
             ToolRegistry     = new Mantle.ToolRegistry(),
-            Compaction       = new Mantle.ConversationCompactionOptions(8192, ReservedForGeneration: 256),
-            ContextTokens    = 8192,
-            BatchTokens      = 1024,
-            MicroBatchTokens = 1024,
+            Logger           = Mantle.ConsoleErrorLogger.Instance,
+            Compaction       = new Mantle.ConversationCompactionOptions(16384, ReservedForGeneration: 4096),
+            ContextTokens    = 16384,
+            BatchTokens      = 4096,
+            MicroBatchTokens = 4096,
+            VisionImageMinTokens = 1024,
+            VisionImageMaxTokens = 1536,
             DefaultRequest   = new Mantle.ResponseRequest
             {
-                MaxOutputTokens = 1024,
+                MaxOutputTokens = 4096,
                 EnableThinking  = false,
             },
         };
@@ -68,9 +71,11 @@ public sealed class MultiImageNativeBackendTests
 
         var response = await lm.RespondAsync(
             [ResponseInput.User(
-                "Analyse this invoice document in full. " +
-                "Identify and describe the supplier, buyer, invoice number, date, currency, " +
-                "and every line item with its description, quantity, unit price, and total.",
+                "These images are pages 1 to 3 of the same invoice. Read every page before answering. " +
+                "Do not guess or invent missing values. If a field is not visible, use 'not visible'. " +
+                "Return JSON only with this shape: " +
+                "{ \"supplier\": string, \"buyer\": string, \"invoiceNumber\": string, \"date\": string, \"currency\": string, \"items\": [{ \"description\": string, \"quantity\": string, \"unitPrice\": string, \"total\": string }] }. " +
+                "Do not include markdown. Do not include commentary. Output only the JSON object.",
                 images)],
             reasoning: ReasoningEffort.None);
 
@@ -79,6 +84,7 @@ public sealed class MultiImageNativeBackendTests
         Assert.IsTrue(text.Length > 0, "The model returned an empty response.");
 
         Console.WriteLine($"[Pages rendered: {images.Count}]");
+        Console.WriteLine($"[Usage: input={response.Usage?.InputTokens}, output={response.Usage?.OutputTokens}, total={response.Usage?.TotalTokens}]");
         Console.WriteLine(text);
     }
 
@@ -88,7 +94,7 @@ public sealed class MultiImageNativeBackendTests
     {
         var results = new List<string>();
 
-        using var reader = DocLib.Instance.GetDocReader(pdfPath, new PageDimensions(2.0));
+        using var reader = DocLib.Instance.GetDocReader(pdfPath, new PageDimensions(2.5));
         int pageCount = reader.GetPageCount();
 
         for (int i = 0; i < pageCount; i++)
@@ -99,8 +105,8 @@ public sealed class MultiImageNativeBackendTests
             img.Mutate(x => x.BackgroundColor(Color.White));
 
             using var ms = new MemoryStream();
-            img.SaveAsJpeg(ms, new JpegEncoder { Quality = 80 });
-            results.Add($"data:image/jpeg;base64,{Convert.ToBase64String(ms.ToArray())}");
+            img.SaveAsPng(ms, new PngEncoder());
+            results.Add($"data:image/png;base64,{Convert.ToBase64String(ms.ToArray())}");
         }
 
         return results;

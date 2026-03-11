@@ -91,8 +91,10 @@ public sealed class LmEngine : IAsyncDisposable, IDisposable
                 checkTensors: options.CheckTensors);
 
             // Resolve vision projector path before context creation so we can
-            // inflate n_batch when vision will be active. Image token chunks
-            // are decoded in a single llama_decode call and must fit within n_batch.
+            // size n_batch for the full multimodal prompt. When several images
+            // are attached to one request, mtmd can produce far more positions
+            // than a single-image token budget, so using the full context budget
+            // avoids later images being dropped during prompt evaluation.
             // Embedding-only models (no chat template) never use vision.
             string mmprojPath = template is not null
                 ? ResolveMmprojPath(options.ModelPath, options.MmprojPath)
@@ -260,6 +262,7 @@ public sealed class LmEngine : IAsyncDisposable, IDisposable
         try
         {
             var tokenCounts = new Dictionary<int, int>();
+            int emittedTokens = 0;
 
             for (int i = 0; i < maxOutputTokens; i++)
             {
@@ -268,15 +271,21 @@ public sealed class LmEngine : IAsyncDisposable, IDisposable
                 int token = SampleToken(request, tokenCounts);
 
                 if (IsEndOfGeneration(token))
+                {
+                    _options.Logger?.Log(LogLevel.Debug, "generation", $"stop reason=eog token={token} emitted={emittedTokens} max={maxOutputTokens}");
                     yield break;
+                }
 
                 tokenCounts[token] = tokenCounts.TryGetValue(token, out int count) ? count + 1 : 1;
                 string piece = TokenToString(token);
+                emittedTokens++;
 
                 yield return new InferenceToken(token, piece, false);
 
                 DecodeToken(token);
             }
+
+            _options.Logger?.Log(LogLevel.Debug, "generation", $"stop reason=max_output_tokens emitted={emittedTokens} max={maxOutputTokens}");
         }
         finally
         {
