@@ -1,8 +1,8 @@
 <Solution>
   <Project Path="Agentic.Cli/Agentic.Cli.csproj" Id="3ac86002-6f4f-4437-ad7d-44d41239c11e" />
-  <Project Path="Agentic.MCP/Agentic.MCP.csproj" Id="b8aea829-77b1-47e0-ad27-50418ec19fb3" />
   <Project Path="Agentic.Runtime.WebServer/Agentic.Runtime.WebServer.csproj" />
   <Project Path="Agentic.Runtime/Agentic.Runtime.csproj" />
+  <Project Path="Agentic.Shared/Agentic.Shared.csproj" Id="ff01451e-e2f7-4d43-af11-03803c4a1d75" />
   <Project Path="Agentic.Storage/Agentic.Storage.csproj" Id="809f4f9b-f240-450a-b9a6-8932d3fb1fe3" />
   <Project Path="Agentic/Agentic.csproj" />
 </Solution>

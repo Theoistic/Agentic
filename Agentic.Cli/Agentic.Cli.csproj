@@ -15,7 +15,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Agentic\Agentic.csproj" />
-    <ProjectReference Include="..\Agentic.MCP\Agentic.MCP.csproj" />
+    <ProjectReference Include="..\Agentic.Storage\Agentic.Storage.csproj" />
+    <ProjectReference Include="..\Agentic.Runtime\Agentic.Runtime.csproj" />
   </ItemGroup>
 
   <ItemGroup>

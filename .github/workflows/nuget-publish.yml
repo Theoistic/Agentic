@@ -33,10 +33,10 @@ jobs:
           echo "Using version $VERSION"
 
       - name: Restore
-        run: dotnet restore Agentic/Agentic.csproj
+        run: dotnet restore Agentic.slnx
 
       - name: Build
-        run: dotnet build Agentic/Agentic.csproj --configuration Release --no-restore
+        run: dotnet build Agentic.slnx --configuration Release --no-restore
 
       - name: Pack NuGet
         if: startsWith(github.ref, 'refs/tags/v')
