@@ -9,8 +9,8 @@ Console.OutputEncoding = System.Text.Encoding.UTF8;
 //var backendDirectory = Environment.GetEnvironmentVariable("AGENTIC_NATIVE_BACKEND_DIR");
 //var modelPath = Environment.GetEnvironmentVariable("AGENTIC_NATIVE_MODEL_PATH");
 
-const string backendDirectory = @"C:\Users\theo\Downloads\llama-b8250-bin-win-cuda-12.4-x64";
-const string modelPath = @"C:\Users\theo\.lmstudio\models\lmstudio-community\Qwen3.5-9B-GGUF\Qwen3.5-9B-Q4_K_M.gguf";
+const string backendDirectory = @"C:\Users\Theo\Downloads\llama-b8265-bin-win-cuda-12.4-x64";
+const string modelPath = @"C:\Users\Theo\.lmstudio\models\lmstudio-community\Qwen3.5-9B-GGUF\Qwen3.5-9B-Q4_K_M.gguf";
 
 if (string.IsNullOrWhiteSpace(backendDirectory) || string.IsNullOrWhiteSpace(modelPath))
 {

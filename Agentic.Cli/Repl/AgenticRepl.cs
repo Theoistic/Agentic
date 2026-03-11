@@ -5,7 +5,7 @@ namespace Agentic.Cli;
 /// <summary>
 /// A reusable console REPL that attaches to an <see cref="Agent"/> as its IO layer.
 /// Handles streaming output, tool events, and built-in commands
-/// (/reset, /compact, /img) before forwarding plain text to the agent.
+/// (/reset, /img) before forwarding plain text to the agent.
 /// </summary>
 public sealed class AgenticRepl
 {
@@ -29,12 +29,7 @@ public sealed class AgenticRepl
 
     public async Task RunAsync()
     {
-        if (_agent.Context is not null)
-            ConsoleHelper.WriteDim(
-                $"Context: auto-compact at {_agent.Context.Options.CompactionThreshold:P0} " +
-                $"of {_agent.Context.Options.MaxContextTokens:#,0} tokens");
-
-        ConsoleHelper.WriteDim("Commands: exit | quit | /reset | /compact [light|standard|detailed] | /img <url-or-path> [prompt]");
+        ConsoleHelper.WriteDim("Commands: exit | quit | /reset | /img <url-or-path> [prompt]");
 
         while (true)
         {
@@ -51,22 +46,6 @@ public sealed class AgenticRepl
             {
                 _agent.ResetConversation();
                 ConsoleHelper.WriteDim("[conversation reset]");
-                continue;
-            }
-
-            if (input.StartsWith("/compact"))
-            {
-                var level = input.Contains("light")    ? CompactionLevel.Light
-                          : input.Contains("detailed") ? CompactionLevel.Detailed
-                          : CompactionLevel.Standard;
-                try
-                {
-                    var cp = await _agent.CompactAsync(level);
-                    if (cp is not null)
-                        ConsoleHelper.WriteDim(
-                            $"[compacted: {cp.Level} · #{cp.CompactionCount} · {cp.Objective[..Math.Min(80, cp.Objective.Length)]}]");
-                }
-                catch (Exception ex) { ConsoleHelper.Write(ConsoleColor.Red, $"  compact failed: {ex.Message}\n"); }
                 continue;
             }
 
@@ -179,19 +158,7 @@ public sealed class AgenticRepl
                 EnsureNewLine();
                 _hadToolEvents = false;
                 if (e.TotalTokens > 0)
-                {
-                    var maxCtx  = _agent.Context?.Options.MaxContextTokens ?? 0;
-                    var ctxInfo = (maxCtx > 0 && e.InputTokens > 0)
-                        ? $"  ctx={(double)e.InputTokens.Value / maxCtx:P0}"
-                        : "";
-                    ConsoleHelper.WriteDim($"  [{e.InputTokens}↑  {e.OutputTokens}↓  {e.TotalTokens} tokens{ctxInfo}]");
-                }
-                break;
-
-            case AgentEventKind.Compacted:
-                EnsureNewLine();
-                ConsoleHelper.Write(ConsoleColor.Magenta, $"  ◇ {e.Text}\n");
-                _atLineStart = true;
+                    ConsoleHelper.WriteDim($"  [{e.InputTokens}↑  {e.OutputTokens}↓  {e.TotalTokens} tokens]");
                 break;
 
             case AgentEventKind.StepCompleted:

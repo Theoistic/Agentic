@@ -446,7 +446,6 @@ public sealed class HsCodeAnalyzerScenario : IScenario
         await using var agent = new Agent(lm, new AgentOptions
         {
             SystemPrompt = SystemPrompt,
-            Compaction   = new CompactionOptions(),
             Reasoning    = ReasoningEffort.None,
         });
 

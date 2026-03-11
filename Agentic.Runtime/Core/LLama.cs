@@ -1195,7 +1195,6 @@ public static class Llama
                     throw new InvalidOperationException("mtmd produced zero positions for the input chunks.");
 
                 UIntPtr chunkTokens = mtmd_helper_get_n_tokens(chunks.Ptr);
-                int effectiveBatch = Math.Max(nBatch, chunkPos);
 
                 int rc = mtmd_helper_eval_chunks(
                     vision.Ptr,
@@ -1203,13 +1202,13 @@ public static class Llama
                     chunks.Ptr,
                     nPast,
                     seqId,
-                    effectiveBatch,
+                    nBatch,
                     logitsLast,
                     out int newNPast);
 
                 if (rc != 0)
                     throw new InvalidOperationException(
-                        $"mtmd_helper_eval_chunks failed with code {rc}. n_past={nPast}, chunk_pos={chunkPos}, chunk_tokens={(ulong)chunkTokens}, n_batch={effectiveBatch}");
+                        $"mtmd_helper_eval_chunks failed with code {rc}. n_past={nPast}, chunk_pos={chunkPos}, chunk_tokens={(ulong)chunkTokens}, n_batch={nBatch}");
 
                 nPast = newNPast;
             }

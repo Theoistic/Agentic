@@ -55,4 +55,8 @@
 	  <ProjectReference Include="..\Agentic.Storage\Agentic.Storage.csproj" />
 	</ItemGroup>
 
+	<ItemGroup>
+	  <Folder Include="Context\" />
+	</ItemGroup>
+
 </Project>

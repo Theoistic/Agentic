@@ -1,8 +1,8 @@
 ﻿using Agentic.Runtime;
 using Mantle = Agentic.Runtime.Mantle;
 
-const string backendDirectory = @"C:\Users\theo\Downloads\llama-b8250-bin-win-cuda-12.4-x64";
-const string modelPath = @"C:\Users\theo\.lmstudio\models\lmstudio-community\Qwen3.5-9B-GGUF\Qwen3.5-9B-Q4_K_M.gguf";
+const string backendDirectory = @"C:\Users\Theo\Downloads\llama-b8265-bin-win-cuda-12.4-x64";
+const string modelPath = @"C:\Users\Theo\.lmstudio\models\lmstudio-community\Qwen3.5-9B-GGUF\Qwen3.5-9B-Q4_K_M.gguf";
 
 Mantle.IChatRenderer renderer = new Mantle.ConsoleChatRenderer(Console.Out);
 

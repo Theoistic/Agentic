@@ -28,9 +28,7 @@ public enum AgentEventKind
     /// <summary>A workflow step was completed.</summary>
     StepCompleted,
     /// <summary>All steps in a workflow were completed.</summary>
-    WorkflowCompleted,
-    /// <summary>Conversation history was compacted into a checkpoint.</summary>
-    Compacted
+    WorkflowCompleted
 }
 
 /// <summary>An event raised by the <see cref="Agent"/> and delivered to <see cref="AgentOptions.OnEvent"/> and <see cref="AgentOptions.Logger"/>.</summary>
@@ -72,8 +70,6 @@ public sealed class AgentOptions
     public InferenceConfig? Inference { get; set; }
     /// <summary>Callback invoked for every <see cref="AgentEvent"/> during a turn.</summary>
     public Action<AgentEvent>? OnEvent { get; set; }
-    /// <summary>Enables context compaction. <c>null</c> = compaction disabled.</summary>
-    public CompactionOptions? Compaction { get; set; }
     /// <summary>
     /// Reasoning effort for every call made by this agent.
     /// Overrides <see cref="LMConfig.Reasoning"/> when set; <c>null</c> falls back to the LM-level default.

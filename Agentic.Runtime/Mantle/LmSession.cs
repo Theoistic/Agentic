@@ -28,6 +28,7 @@ public sealed record SessionDebugView(
 
 /// <summary>
 /// Maintains conversation state, prompt compaction, tool execution, and generation.
+/// Delegates all native inference to a shared <see cref="LmEngine"/>.
 /// </summary>
 public sealed class LmSession : IAsyncDisposable, IDisposable
 {
@@ -41,130 +42,68 @@ public sealed class LmSession : IAsyncDisposable, IDisposable
         IReadOnlyDictionary<string, RemoteToolBinding> RemoteTools);
 
     private readonly LmSessionOptions _options;
+    private readonly LmEngine _engine;
     private readonly List<ChatMessage> _history = [];
-    private readonly List<int> _cachedTokens = [];
-    private readonly SemaphoreSlim _syncLock = new(1, 1);
-    private readonly Random _random;
     private readonly Dictionary<string, IReadOnlyList<ChatMessage>> _responseHistories = new(StringComparer.Ordinal);
 
-    private readonly string _template;
-    private readonly string? _bosToken;
-    private readonly string _imageToken;
     private readonly ResponseRequest _defaultRequest;
     private readonly ConversationCompactionOptions _compaction;
     private readonly IConversationCompactor _conversationCompactor;
     private readonly IToolExecutionEngine _toolExecutionEngine;
 
-    private Llama.Model _model;
-    private Llama.Context _context;
-    private Llama.Vision.Context _visionContext;
-    private bool _cacheContainsVision;
     private bool _disposed;
 
-    public bool VisionEnabled => !_visionContext.IsNull;
-    public string? VisionDisabledReason { get; }
+    // Tracks which session is active on the current async call chain so that
+    // nested tool calls (e.g. ScanPdfPage → lm.RespondAsync) can detect
+    // re-entrancy and save/restore history instead of corrupting the outer call.
+    private static readonly AsyncLocal<LmSession?> s_reentrancyOwner = new();
+
+    public bool VisionEnabled => _engine.VisionEnabled;
+    public string? VisionDisabledReason => _engine.VisionDisabledReason;
     public IReadOnlyList<ChatMessage> History => _history;
     public ResponseObject? LastResponse { get; private set; }
+
+    /// <summary>
+    /// Gets the underlying inference engine used by this session.
+    /// </summary>
+    public LmEngine Engine => _engine;
 
     /// <summary>
     /// Raised whenever the session prepares a prompt for model execution.
     /// </summary>
     public event EventHandler<SessionDebugView>? DebugViewCreated;
 
-    private LmSession(
-        LmSessionOptions options,
-        Llama.Model model,
-        Llama.Context context,
-        Llama.Vision.Context visionContext,
-        string template,
-        string? bosToken,
-        string? visionDisabledReason)
+    private LmSession(LmSessionOptions options, LmEngine engine)
     {
         _options = options;
-        _model = model;
-        _context = context;
-        _visionContext = visionContext;
-        _template = template;
-        _bosToken = bosToken;
-        _imageToken = InferImageToken(template);
+        _engine = engine;
         _defaultRequest = options.DefaultRequest ?? new ResponseRequest();
         _compaction = options.Compaction;
         _conversationCompactor = options.ConversationCompactor ?? new TokenWindowConversationCompactor();
         _toolExecutionEngine = options.ToolExecutionEngine ?? new DefaultToolExecutionEngine([new McpRemoteToolExecutor()]);
-        _random = _defaultRequest.Seed is int seed ? new Random(seed) : Random.Shared;
-        VisionDisabledReason = visionDisabledReason;
     }
 
     /// <summary>
     /// Creates and initializes a session from the provided options.
     /// </summary>
-    public static Task<LmSession> CreateAsync(LmSessionOptions options, CancellationToken ct = default)
+    public static async Task<LmSession> CreateAsync(LmSessionOptions options, CancellationToken ct = default)
     {
-        ArgumentNullException.ThrowIfNull(options);
-
-        string path = Environment.GetEnvironmentVariable("PATH") ?? string.Empty;
-        if (!path.Contains(options.BackendDirectory))
-            Environment.SetEnvironmentVariable("PATH", $"{path};{options.BackendDirectory}");
-
-        return Task.Run(() =>
-        {
-            Llama.Init(options.BackendDirectory, options.Logger);
-            // Automatically resolve template and tokens from GGUF metadata
-            var metadata = GgufReader.ReadMetadata(options.ModelPath);
-            string template = GgufReader.GetString(metadata, "tokenizer.chat_template")
-                ?? throw new InvalidOperationException("No chat template found in GGUF metadata.");
-            string? bosToken = GgufReader.ResolveTokenById(metadata, "tokenizer.ggml.bos_token_id");
-
-            var model = Llama.LoadModel(
-                options.ModelPath,
-                useMmap: options.UseMmap,
-                useMlock: options.UseMlock,
-                checkTensors: options.CheckTensors);
-            var context = Llama.CreateContext(
-                model,
-                nCtx: options.ContextTokens,
-                nBatch: options.BatchTokens,
-                nUbatch: options.MicroBatchTokens,
-                nThreads: options.Threads,
-                embeddings: true,
-                unifiedKvCache: options.UnifiedKvCache,
-                ropeFreqBase: options.RopeFrequencyBase,
-                ropeFreqScale: options.RopeFrequencyScale,
-                offloadKvCacheToGpu: options.OffloadKvCacheToGpu,
-                flashAttention: options.FlashAttention,
-                kvCacheTypeK: options.KvCacheTypeK,
-                kvCacheTypeV: options.KvCacheTypeV);
-
-            Llama.Vision.Context visionCtx = default;
-            string? visionDisabledReason = null;
-            string mmprojPath = ResolveMmprojPath(options.ModelPath, options.MmprojPath);
-
-            if (!string.IsNullOrEmpty(mmprojPath))
-            {
-                try
-                {
-                    visionCtx = Llama.Vision.Load(
-                        model,
-                        mmprojPath,
-                        useGpu: options.UseGpuForVision,
-                        nThreads: options.VisionThreads > 0 ? options.VisionThreads : Environment.ProcessorCount,
-                        mediaMarker: Llama.Vision.DefaultMarker,
-                        warmup: false,
-                        imageMinTokens: options.VisionImageMinTokens,
-                        imageMaxTokens: options.VisionImageMaxTokens);
-                }
-                catch (Exception ex)
-                {
-                    visionDisabledReason = ex.Message;
-                }
-            }
-
-            return new LmSession(options, model, context, visionCtx, template, bosToken, visionDisabledReason);
-        }, ct);
+        var engine = await LmEngine.CreateAsync(options, ct);
+        return new LmSession(options, engine);
     }
 
     /// <summary>
-    /// Clears session history and cached context state.
+    /// Creates a session that shares an existing engine instance.
+    /// </summary>
+    public static LmSession Create(LmSessionOptions options, LmEngine engine)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(engine);
+        return new LmSession(options, engine);
+    }
+
+    /// <summary>
+    /// Clears session history and response state.
     /// </summary>
     public void Reset()
     {
@@ -175,14 +114,11 @@ public sealed class LmSession : IAsyncDisposable, IDisposable
     private void ResetCore(bool clearResponses)
     {
         _history.Clear();
-        _cachedTokens.Clear();
         if (clearResponses)
         {
             _responseHistories.Clear();
             LastResponse = null;
         }
-        _cacheContainsVision = false;
-        _context = ResetContext(_model, _context, _options.ContextTokens, _options.BatchTokens, _options.MicroBatchTokens);
     }
 
     /// <summary>
@@ -211,7 +147,14 @@ public sealed class LmSession : IAsyncDisposable, IDisposable
             throw new InvalidOperationException("Response requests must contain at least one input item.");
 
         ThrowIfDisposed();
-        await _syncLock.WaitAsync(ct);
+
+        bool isReentrant = s_reentrancyOwner.Value == this;
+        List<ChatMessage>? savedHistory = null;
+
+        if (isReentrant)
+            savedHistory = SaveHistorySnapshot();
+        else
+            s_reentrancyOwner.Value = this;
 
         try
         {
@@ -234,7 +177,10 @@ public sealed class LmSession : IAsyncDisposable, IDisposable
         }
         finally
         {
-            _syncLock.Release();
+            if (isReentrant)
+                RestoreAfterReentrantCall(savedHistory!);
+            else
+                s_reentrancyOwner.Value = null;
         }
     }
 
@@ -250,7 +196,14 @@ public sealed class LmSession : IAsyncDisposable, IDisposable
             throw new InvalidOperationException("Response requests must contain at least one input item.");
 
         ThrowIfDisposed();
-        await _syncLock.WaitAsync(ct);
+
+        bool isReentrant = s_reentrancyOwner.Value == this;
+        List<ChatMessage>? savedHistory = null;
+
+        if (isReentrant)
+            savedHistory = SaveHistorySnapshot();
+        else
+            s_reentrancyOwner.Value = this;
 
         try
         {
@@ -272,54 +225,29 @@ public sealed class LmSession : IAsyncDisposable, IDisposable
         }
         finally
         {
-            _syncLock.Release();
+            if (isReentrant)
+                RestoreAfterReentrantCall(savedHistory!);
+            else
+                s_reentrancyOwner.Value = null;
         }
     }
 
     /// <summary>
     /// Generates an embedding vector as <see cref="float"/> values.
     /// </summary>
-    public async Task<float[]> EmbedAsync(string text, CancellationToken ct = default)
+    public Task<float[]> EmbedAsync(string text, CancellationToken ct = default)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(text);
-
         ThrowIfDisposed();
-        await _syncLock.WaitAsync(ct);
-
-        try
-        {
-            ResetCacheInternal();
-            int[] tokens = Llama.Tokenize(_model, text);
-            await Task.Run(() => DecodePromptWithCacheContinuation(tokens), ct);
-            return await Task.Run(() => Llama.GetEmbeddings(_context, _model), ct);
-        }
-        finally
-        {
-            _syncLock.Release();
-        }
+        return _engine.EmbedAsync(text, ct);
     }
 
     /// <summary>
     /// Generates an embedding vector as <see cref="double"/> values.
     /// </summary>
-    public async Task<double[]> EmbedAsDoubleAsync(string text, CancellationToken ct = default)
+    public Task<double[]> EmbedAsDoubleAsync(string text, CancellationToken ct = default)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(text);
-
         ThrowIfDisposed();
-        await _syncLock.WaitAsync(ct);
-
-        try
-        {
-            ResetCacheInternal();
-            int[] tokens = Llama.Tokenize(_model, text);
-            await Task.Run(() => DecodePromptWithCacheContinuation(tokens), ct);
-            return await Task.Run(() => Llama.GetEmbeddingsAsDouble(_context, _model), ct);
-        }
-        finally
-        {
-            _syncLock.Release();
-        }
+        return _engine.EmbedAsDoubleAsync(text, ct);
     }
 
     /// <summary>
@@ -330,7 +258,14 @@ public sealed class LmSession : IAsyncDisposable, IDisposable
         [EnumeratorCancellation] CancellationToken ct = default)
     {
         ThrowIfDisposed();
-        await _syncLock.WaitAsync(ct);
+
+        bool isReentrant = s_reentrancyOwner.Value == this;
+        List<ChatMessage>? savedHistory = null;
+
+        if (isReentrant)
+            savedHistory = SaveHistorySnapshot();
+        else
+            s_reentrancyOwner.Value = this;
 
         try
         {
@@ -341,7 +276,10 @@ public sealed class LmSession : IAsyncDisposable, IDisposable
         }
         finally
         {
-            _syncLock.Release();
+            if (isReentrant)
+                RestoreAfterReentrantCall(savedHistory!);
+            else
+                s_reentrancyOwner.Value = null;
         }
     }
 
@@ -359,39 +297,29 @@ public sealed class LmSession : IAsyncDisposable, IDisposable
 
             var fitted = CompactHistory(_history);
             var promptMessages = ApplyImageRetentionPolicy(fitted, _options.ImageRetentionPolicy);
-            string prompt = RenderPrompt(promptMessages, request);
-            int[] promptTokens = Llama.Tokenize(_model, prompt);
+            string prompt = _engine.RenderPrompt(promptMessages, request);
+            int[] promptTokens = _engine.Tokenize(prompt);
 
             DebugViewCreated?.Invoke(this, new SessionDebugView(
                 History: [.. _history],
                 PromptMessages: [.. promptMessages],
                 RenderedPrompt: prompt,
-                Tools: request.Tools?.Select(BuildPromptTool).Cast<object?>().ToList(),
+                Tools: request.Tools?.Select(LmEngine.BuildPromptTool).Cast<object?>().ToList(),
                 PromptTokens: promptTokens.Length));
 
-            await EnsurePromptEncodedAsync(prompt, promptTokens, promptMessages, ct);
+            List<string> imageBase64s = ExtractImageBase64s(promptMessages);
+            await _engine.EncodePromptAsync(prompt, promptTokens, imageBase64s, ct);
 
             var output = new StringBuilder();
             List<ToolCall>? toolCalls = null;
-            var tokenCounts = new Dictionary<int, int>();
             int completionTokens = 0;
             int emittedContentLength = 0;
             int emittedReasoningLength = 0;
             int maxOutputTokens = request.MaxOutputTokens.GetValueOrDefault() > 0 ? request.MaxOutputTokens.GetValueOrDefault() : _options.ContextTokens;
 
-            for (int i = 0; i < maxOutputTokens; i++)
+            await foreach (var token in _engine.GenerateTokensAsync(request, maxOutputTokens, ct).ConfigureAwait(false))
             {
-                ct.ThrowIfCancellationRequested();
-
-                int token = Llama.Sample(_context, _model, request, tokenCounts, _random);
-
-                if (Llama.IsEndOfGeneration(_model, token))
-                    break;
-
-                tokenCounts[token] = tokenCounts.TryGetValue(token, out int count) ? count + 1 : 1;
-
-                string piece = Llama.TokenToString(_model, token);
-                output.Append(piece);
+                output.Append(token.Text);
                 completionTokens++;
 
                 var parsedOutput = ParseAssistantOutput(output.ToString(), request.EnableThinking ?? true);
@@ -404,14 +332,6 @@ public sealed class LmSession : IAsyncDisposable, IDisposable
 
                 if (MiniJinjaChatTemplate.TryParseToolCalls(output.ToString(), out toolCalls))
                     break;
-
-                await Task.Run(() =>
-                {
-                    using var batch = Llama.CreateBatch([token]);
-                    int rc = Llama.Decode(_context, batch);
-                    if (rc != 0) throw new InvalidOperationException($"llama_decode failed: {rc}");
-                    _cachedTokens.Add(token);
-                }, ct);
             }
 
             string outputText = output.ToString();
@@ -428,6 +348,9 @@ public sealed class LmSession : IAsyncDisposable, IDisposable
                 _history.Add(assistantMessage);
                 yield return new ChatResponseChunk(Usage: usage);
 
+                // Tool execution happens with the engine lock released, so nested
+                // calls (e.g. tools that invoke the engine for embeddings or sub-generation)
+                // can proceed without deadlocking.
                 foreach (var call in toolCalls!)
                 {
                     string result = await ExecuteToolAsync(call, executionContext.RemoteTools, ct);
@@ -770,39 +693,6 @@ public sealed class LmSession : IAsyncDisposable, IDisposable
         return result;
     }
 
-    private async Task EnsurePromptEncodedAsync(string prompt, int[] promptTokens, IReadOnlyList<ChatMessage> fitted, CancellationToken ct)
-    {
-        List<string> imageBase64s = ExtractImageBase64s(fitted);
-        bool hasImages = VisionEnabled
-            && imageBase64s.Count > 0
-            && !string.IsNullOrEmpty(_imageToken)
-            && prompt.Contains(_imageToken, StringComparison.Ordinal);
-
-        if (hasImages)
-        {
-            ResetCacheInternal();
-            string mtmdPrompt = prompt.Replace(_imageToken, Llama.Vision.DefaultMarker, StringComparison.Ordinal);
-            int imageMarkerCount = CountOccurrences(mtmdPrompt, Llama.Vision.DefaultMarker);
-
-            if (imageMarkerCount != imageBase64s.Count)
-                throw new InvalidOperationException($"Prompt expects {imageMarkerCount} image(s), but {imageBase64s.Count} image payload(s) were collected from the fitted history.");
-
-            await Task.Run(() =>
-            {
-                int nPast = 0;
-                Llama.Vision.EvalPromptWithBase64Images(
-                    _visionContext, _context, mtmdPrompt, imageBase64s,
-                    ref nPast, nBatch: _options.BatchTokens);
-            }, ct);
-
-            _cacheContainsVision = true;
-        }
-        else
-        {
-            await Task.Run(() => DecodePromptWithCacheContinuation(promptTokens), ct);
-        }
-    }
-
     private static ParsedAssistantOutput ParseAssistantOutput(string rawText, bool enableThinking)
     {
         const string thinkStart = "<think>";
@@ -917,15 +807,6 @@ public sealed class LmSession : IAsyncDisposable, IDisposable
         return await _toolExecutionEngine.ExecuteAsync(new ToolExecutionRequest(call, tool, _options.ToolRegistry), ct);
     }
 
-    private static Dictionary<int, int> CreateTokenCounts(IEnumerable<int> tokens)
-    {
-        var counts = new Dictionary<int, int>();
-        foreach (int token in tokens)
-            counts[token] = counts.TryGetValue(token, out int count) ? count + 1 : 1;
-
-        return counts;
-    }
-
     private static List<string> ExtractImageBase64s(IReadOnlyList<ChatMessage> messages)
     {
         var images = new List<string>();
@@ -944,84 +825,11 @@ public sealed class LmSession : IAsyncDisposable, IDisposable
         return images;
     }
 
-    private static int CountOccurrences(string text, string value)
-    {
-        if (string.IsNullOrEmpty(text) || string.IsNullOrEmpty(value))
-            return 0;
-
-        int count = 0;
-        int index = 0;
-
-        while ((index = text.IndexOf(value, index, StringComparison.Ordinal)) >= 0)
-        {
-            count++;
-            index += value.Length;
-        }
-
-        return count;
-    }
-
-    private void DecodePromptWithCacheContinuation(int[] promptTokens)
-    {
-        if (_cacheContainsVision) ResetCacheInternal();
-
-        int prefixLength = GetCommonPrefixLength(promptTokens, _cachedTokens);
-
-        if (prefixLength < _cachedTokens.Count)
-        {
-            if (!Llama.TryRemoveCacheRange(_context, 0, prefixLength))
-            {
-                ResetCacheInternal();
-                prefixLength = 0;
-            }
-            else
-            {
-                _cachedTokens.RemoveRange(prefixLength, _cachedTokens.Count - prefixLength);
-            }
-        }
-
-        if (prefixLength < promptTokens.Length)
-        {
-            int[] suffix = promptTokens[prefixLength..];
-            for (int offset = 0; offset < suffix.Length; offset += _options.BatchTokens)
-            {
-                int count = Math.Min(_options.BatchTokens, suffix.Length - offset);
-                int[] chunk = new int[count];
-                Array.Copy(suffix, offset, chunk, 0, count);
-
-                using var batch = Llama.CreateBatch(chunk);
-                if (Llama.Decode(_context, batch) != 0) throw new InvalidOperationException("Decode failed.");
-            }
-            _cachedTokens.AddRange(suffix);
-        }
-    }
-
-    private void ResetCacheInternal()
-    {
-        _context = ResetContext(_model, _context, _options.ContextTokens, _options.BatchTokens, _options.MicroBatchTokens);
-        _cachedTokens.Clear();
-        _cacheContainsVision = false;
-    }
-
-    private static Llama.Context ResetContext(Llama.Model model, Llama.Context context, int nCtx, int nBatch, int nUbatch)
-    {
-        Llama.FreeContext(context);
-        return Llama.CreateContext(model, nCtx, nBatch, nUbatch, embeddings: true);
-    }
-
-    private static int GetCommonPrefixLength(int[] prompt, List<int> cache)
-    {
-        int limit = Math.Min(prompt.Length, cache.Count);
-        int i = 0;
-        while (i < limit && prompt[i] == cache[i]) i++;
-        return i;
-    }
-
     private IReadOnlyList<ChatMessage> CompactHistory(IReadOnlyList<ChatMessage> messages)
         => _conversationCompactor.Compact(messages, new ConversationCompactionContext(_compaction, CountTokens, HasRenderableUserQuery));
 
     private int CountTokens(IReadOnlyList<ChatMessage> messages)
-        => Llama.Tokenize(_model, RenderPrompt(messages, _defaultRequest)).Length;
+        => _engine.Tokenize(_engine.RenderPrompt(messages, _defaultRequest)).Length;
 
     private static bool HasRenderableUserQuery(IReadOnlyList<ChatMessage> messages)
     {
@@ -1037,129 +845,25 @@ public sealed class LmSession : IAsyncDisposable, IDisposable
         return false;
     }
 
-    private string RenderPrompt(IReadOnlyList<ChatMessage> messages, ResponseRequest request)
-    {
-        ValidateMessages(messages);
-        var ctx = new Dictionary<string, object?>(StringComparer.Ordinal)
-        {
-            ["messages"] = messages.Select(BuildTemplateMessage).Cast<object?>().ToList(),
-            ["add_generation_prompt"] = true,
-            ["enable_thinking"] = request.EnableThinking ?? true,
-            ["add_vision_id"] = request.AddVisionId,
-            ["tools"] = request.Tools?.Select(BuildPromptTool).Cast<object?>().ToList()
-        };
-        if (!string.IsNullOrEmpty(_bosToken)) ctx["bos_token"] = _bosToken;
-
-        return MiniJinjaChatTemplate.Render(_template, ctx);
-    }
-
-    private static object BuildPromptTool(ResponseToolDefinition tool) => new
-    {
-        name = tool.Name,
-        description = tool.Description,
-        parameters = tool.Parameters ?? new { type = "object" }
-    };
-
-    private static void ValidateMessages(IReadOnlyList<ChatMessage> messages)
-    {
-        for (int i = 1; i < messages.Count; i++)
-            if (messages[i].Role == "system") throw new InvalidOperationException("System message must be first.");
-    }
-
-    private static Dictionary<string, object?> BuildTemplateMessage(ChatMessage message)
-    {
-        var result = new Dictionary<string, object?>(StringComparer.Ordinal) { ["role"] = message.Role };
-        object? content = BuildTemplateContent(message);
-        if (content is not null) result["content"] = content;
-        if (!string.IsNullOrWhiteSpace(message.ToolCallId)) result["call_id"] = message.ToolCallId;
-        if (!string.IsNullOrWhiteSpace(message.ReasoningContent)) result["reasoning_content"] = message.ReasoningContent;
-        if (message.ToolCalls is { Count: > 0 })
-            result["tool_calls"] = message.ToolCalls.Select(BuildTemplateToolCall).Cast<object?>().ToList();
-        return result;
-    }
-
-    private static object? BuildTemplateContent(ChatMessage message)
-    {
-        if (message.Parts is not { Count: > 0 }) return message.Content;
-        return message.Parts.Select(p => p switch
-        {
-            TextPart t => new Dictionary<string, object?>(StringComparer.Ordinal) { ["type"] = "text", ["text"] = t.Text },
-            ImagePart => new Dictionary<string, object?>(StringComparer.Ordinal) { ["type"] = "image", ["image"] = true },
-            _ => (object?)null
-        }).Where(x => x != null).ToList();
-    }
-
-    private static Dictionary<string, object?> BuildTemplateToolCall(ToolCall toolCall)
-    {
-        object? args = ConvertTemplateValue(toolCall.Arguments);
-        return new Dictionary<string, object?>(StringComparer.Ordinal)
-        {
-            ["id"] = toolCall.CallId,
-            ["call_id"] = toolCall.CallId,
-            ["name"] = toolCall.Name,
-            ["arguments"] = args,
-            ["function"] = new Dictionary<string, object?>(StringComparer.Ordinal)
-            {
-                ["name"] = toolCall.Name,
-                ["arguments"] = args,
-                ["id"] = toolCall.CallId,
-                ["call_id"] = toolCall.CallId
-            }
-        };
-    }
-
-    private static object? ConvertTemplateValue(object? value)
-    {
-        if (value is null) return null;
-        if (value is System.Text.Json.JsonElement element) return element.Clone();
-        if (value is IDictionary<string, object?> dict)
-        {
-            var d = new Dictionary<string, object?>(StringComparer.Ordinal);
-            foreach (var kv in dict) d[kv.Key] = ConvertTemplateValue(kv.Value);
-            return d;
-        }
-        if (value is System.Collections.IEnumerable enumerable && value is not string)
-        {
-            return enumerable.Cast<object>().Select(ConvertTemplateValue).ToList();
-        }
-        return value;
-    }
-
-    private static string ResolveMmprojPath(string modelPath, string? mmprojPath)
-    {
-        if (!string.IsNullOrWhiteSpace(mmprojPath)) return mmprojPath;
-        return Directory.GetFiles(Path.GetDirectoryName(Path.GetFullPath(modelPath)) ?? ".", "*.gguf")
-            .FirstOrDefault(f => Path.GetFileName(f).Contains("mmproj", StringComparison.OrdinalIgnoreCase)) ?? string.Empty;
-    }
-
-    private static string InferImageToken(string template)
-    {
-        const string qwenVisionToken = "<|vision_start|><|image_pad|><|vision_end|>";
-        return template.Contains(qwenVisionToken, StringComparison.Ordinal) ? qwenVisionToken : string.Empty;
-    }
-
     public async ValueTask DisposeAsync()
     {
         if (_disposed) return;
-        await _syncLock.WaitAsync();
-        try
-        {
-            await Task.Run(() =>
-            {
-                if (!_visionContext.IsNull) Llama.Vision.Free(_visionContext);
-                if (!_context.IsNull) Llama.FreeContext(_context);
-                if (!_model.IsNull) Llama.FreeModel(_model);
-                Llama.Shutdown();
-            });
-            _disposed = true;
-        }
-        finally { _syncLock.Release(); _syncLock.Dispose(); }
+        _disposed = true;
+        await _engine.DisposeAsync();
     }
 
     /// <summary>
     /// Disposes the session synchronously.
     /// </summary>
     public void Dispose() => DisposeAsync().AsTask().GetAwaiter().GetResult();
+
+    private List<ChatMessage> SaveHistorySnapshot() => [.. _history];
+
+    private void RestoreAfterReentrantCall(List<ChatMessage> savedHistory)
+    {
+        _history.Clear();
+        _history.AddRange(savedHistory);
+    }
 
     private void ThrowIfDisposed() => ObjectDisposedException.ThrowIf(_disposed, this);
 }

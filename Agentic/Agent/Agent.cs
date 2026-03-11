@@ -10,8 +10,7 @@ namespace Agentic;
 // ═══════════════════════════════════════════════════════════════════════════
 
 /// <summary>
-/// Multi-turn LLM agent with streaming, MCP tool orchestration, workflow execution,
-/// and optional context compaction.
+/// Multi-turn LLM agent with streaming, MCP tool orchestration, and workflow execution.
 /// </summary>
 public sealed class Agent : IAsyncDisposable
 {
@@ -22,18 +21,16 @@ public sealed class Agent : IAsyncDisposable
     public ToolRegistry Tools { get; }
     /// <summary>Configuration options supplied at construction time.</summary>
     public AgentOptions Options { get; }
-    /// <summary>Context manager responsible for token tracking and compaction. <c>null</c> when compaction is disabled.</summary>
-    public ContextManager? Context { get; }
 
     /// <summary>Initialises a new agent with its own internal <see cref="ToolRegistry"/>.</summary>
     /// <param name="lm">The LM client used for all API calls.</param>
     /// <param name="options">Agent options; a default instance is used when <c>null</c>.</param>
-    public Agent(ILLMBackend lm, AgentOptions? options = null) { _lm = lm; Tools = new(); Options = options ?? new(); Context = Options.Compaction is not null ? new ContextManager(Options.Compaction) : null; }
+    public Agent(ILLMBackend lm, AgentOptions? options = null) { _lm = lm; Tools = new(); Options = options ?? new(); }
     /// <summary>Initialises a new agent with a shared <see cref="ToolRegistry"/>.</summary>
     /// <param name="lm">The LM client used for all API calls.</param>
     /// <param name="tools">A shared tool registry (e.g. injected via DI).</param>
     /// <param name="options">Agent options; a default instance is used when <c>null</c>.</param>
-    public Agent(ILLMBackend lm, ToolRegistry tools, AgentOptions? options = null) { _lm = lm; Tools = tools; Options = options ?? new(); Context = Options.Compaction is not null ? new ContextManager(Options.Compaction) : null; }
+    public Agent(ILLMBackend lm, ToolRegistry tools, AgentOptions? options = null) { _lm = lm; Tools = tools; Options = options ?? new(); }
 
     /// <summary>Registers a tool set and returns this agent for fluent chaining.</summary>
     /// <typeparam name="T">The tool set type.</typeparam>
@@ -42,27 +39,10 @@ public sealed class Agent : IAsyncDisposable
     public Agent RegisterTools<T>(T toolSet, bool replaceExisting = false) where T : IAgentToolSet
     { Tools.Register(toolSet, replaceExisting); return this; }
 
-    /// <summary>Clears the response-chain ID and resets the context manager, starting a fresh conversation.</summary>
-    public void ResetConversation() { _lastResponseId = null; Context?.Reset(); }
+    /// <summary>Clears the response-chain ID, starting a fresh conversation.</summary>
+    public void ResetConversation() { _lastResponseId = null; }
 
-    /// <summary>
-    /// Manually trigger context compaction. Compresses older conversation history
-    /// into a structured checkpoint and resets the response chain so the next call
-    /// replays only the checkpoint + hot tail.
-    /// </summary>
-    public async Task<Checkpoint?> CompactAsync(CompactionLevel? level = null,
-        int? targetTokens = null, CancellationToken ct = default)
-    {
-        if (Context is null) return null;
-        var checkpoint = await Context.CompactAsync(_lm, level, targetTokens, ct);
-        if (checkpoint is null) return null;
-        _lastResponseId = null;
-        Emit(AgentEventKind.Compacted,
-            text: $"Compacted to {checkpoint.Level} checkpoint (#{checkpoint.CompactionCount})");
-        return checkpoint;
-    }
-
-    /// <summary>Single-shot /v1/responses request with MCP tools. Does not maintain conversation history.</summary>
+    /// <summary>Single-shot
     /// <param name="input">The user message to send.</param>
     /// <param name="mcpServerUrl">URL of the MCP server that supplies tools.</param>
     /// <param name="serverLabel">Optional label for the MCP server; defaults to <c>"agentic"</c>.</param>
@@ -136,38 +116,19 @@ public sealed class Agent : IAsyncDisposable
         string? model = null, CancellationToken ct = default)
     {
         Emit(AgentEventKind.UserInput, text: input);
-        if (Context?.ShouldCompact == true) await CompactAsync(ct: ct);
-
-        var instructions       = Context?.GetEffectiveSystemPrompt(Options.SystemPrompt) ?? Options.SystemPrompt;
         var tools              = BuildToolDefinitions(mcpServerUrl, serverLabel, allowedTools, mcpHeaders);
         var effectiveReasoning = reasoning ?? Options.Reasoning;
         var effectiveModel     = model ?? Options.Model;
         var effectiveInference = inference ?? Options.Inference;
-        EmitRequestContext(instructions, tools);
-
-        ResponseResponse resp;
-        if (Context is not null && _lastResponseId is null && Context.IsCheckpointed)
-        {
-            var inputs = Context.GetHotTailAsInput();
-            inputs.Add(new ResponseInput { Role = "user", Content = input });
-            resp = await _lm.RespondAsync(inputs, instructions: instructions,
-                inference: effectiveInference, tools: tools, reasoning: effectiveReasoning,
-                model: effectiveModel, ct: ct);
-        }
-        else
-        {
-            resp = await _lm.RespondAsync(input, instructions: instructions,
-                previousResponseId: _lastResponseId, inference: effectiveInference,
-                tools: tools, reasoning: effectiveReasoning, model: effectiveModel, ct: ct);
-        }
-
+        EmitRequestContext(Options.SystemPrompt, tools);
+        var resp = await _lm.RespondAsync(input, instructions: Options.SystemPrompt,
+            previousResponseId: _lastResponseId, inference: effectiveInference,
+            tools: tools, reasoning: effectiveReasoning, model: effectiveModel, ct: ct);
         _lastResponseId = resp.ResponseId;
-        var result = ParseOutput(resp);
-        RecordResponse(input, result);
-        return result;
+        return ParseOutput(resp);
     }
 
-    /// <summary>Multi-turn /v1/responses with text and images. Maintains conversation history across calls.</summary>
+    /// <summary>Multi-turn /v1/responses with text and images.
     /// <param name="text">The user message text.</param>
     /// <param name="images">Image URLs or base64 data URLs.</param>
     /// <param name="mcpServerUrl">URL of the MCP server that supplies tools.</param>
@@ -185,39 +146,20 @@ public sealed class Agent : IAsyncDisposable
         string? model = null, CancellationToken ct = default)
     {
         Emit(AgentEventKind.UserInput, text: text);
-        if (Context?.ShouldCompact == true) await CompactAsync(ct: ct);
-
-        var instructions       = Context?.GetEffectiveSystemPrompt(Options.SystemPrompt) ?? Options.SystemPrompt;
         var tools              = BuildToolDefinitions(mcpServerUrl, serverLabel, allowedTools, mcpHeaders);
         var effectiveReasoning = reasoning ?? Options.Reasoning;
         var effectiveModel     = model ?? Options.Model;
         var effectiveInference = inference ?? Options.Inference;
         var userInput          = ResponseInput.User(text, images);
-        EmitRequestContext(instructions, tools);
-
-        ResponseResponse resp;
-        if (Context is not null && _lastResponseId is null && Context.IsCheckpointed)
-        {
-            var inputs = Context.GetHotTailAsInput();
-            inputs.Add(userInput);
-            resp = await _lm.RespondAsync(inputs, instructions: instructions,
-                inference: effectiveInference, tools: tools, reasoning: effectiveReasoning,
-                model: effectiveModel, ct: ct);
-        }
-        else
-        {
-            resp = await _lm.RespondAsync([userInput], instructions: instructions,
-                previousResponseId: _lastResponseId, inference: effectiveInference,
-                tools: tools, reasoning: effectiveReasoning, model: effectiveModel, ct: ct);
-        }
-
+        EmitRequestContext(Options.SystemPrompt, tools);
+        var resp = await _lm.RespondAsync([userInput], instructions: Options.SystemPrompt,
+            previousResponseId: _lastResponseId, inference: effectiveInference,
+            tools: tools, reasoning: effectiveReasoning, model: effectiveModel, ct: ct);
         _lastResponseId = resp.ResponseId;
-        var result = ParseOutput(resp);
-        RecordResponse(text, result);
-        return result;
+        return ParseOutput(resp);
     }
 
-    /// <summary>Single-shot streaming /v1/responses with real-time events. Does not maintain conversation history.</summary>
+    /// <summary>Single-shot streaming
     /// <param name="input">The user message to send.</param>
     /// <param name="mcpServerUrl">URL of the MCP server that supplies tools.</param>
     /// <param name="serverLabel">Optional label for the MCP server; defaults to <c>"agentic"</c>.</param>
@@ -289,37 +231,18 @@ public sealed class Agent : IAsyncDisposable
         string? model = null, CancellationToken ct = default)
     {
         Emit(AgentEventKind.UserInput, text: input);
-        if (Context?.ShouldCompact == true) await CompactAsync(ct: ct);
-
-        var instructions       = Context?.GetEffectiveSystemPrompt(Options.SystemPrompt) ?? Options.SystemPrompt;
         var tools              = BuildToolDefinitions(mcpServerUrl, serverLabel, allowedTools, mcpHeaders);
         var effectiveReasoning = reasoning ?? Options.Reasoning;
         var effectiveModel     = model ?? Options.Model;
         var effectiveInference = inference ?? Options.Inference;
-        EmitRequestContext(instructions, tools);
-
-        AgentResponse response;
-        if (Context is not null && _lastResponseId is null && Context.IsCheckpointed)
-        {
-            var inputs = Context.GetHotTailAsInput();
-            inputs.Add(new ResponseInput { Role = "user", Content = input });
-            response = await ConsumeStreamAsync(_lm.RespondStreamingAsync(inputs,
-                instructions: instructions, inference: effectiveInference,
-                tools: tools, reasoning: effectiveReasoning, model: effectiveModel, ct: ct));
-        }
-        else
-        {
-            response = await ConsumeStreamAsync(_lm.RespondStreamingAsync(input,
-                instructions: instructions, previousResponseId: _lastResponseId,
-                inference: effectiveInference, tools: tools, reasoning: effectiveReasoning,
-                model: effectiveModel, ct: ct));
-        }
-
-        RecordResponse(input, response);
-        return response;
+        EmitRequestContext(Options.SystemPrompt, tools);
+        return await ConsumeStreamAsync(_lm.RespondStreamingAsync(input,
+            instructions: Options.SystemPrompt, previousResponseId: _lastResponseId,
+            inference: effectiveInference, tools: tools, reasoning: effectiveReasoning,
+            model: effectiveModel, ct: ct));
     }
 
-    /// <summary>Multi-turn streaming /v1/responses with text and images, with real-time events.</summary>
+    /// <summary>Multi-turn streaming /v1/responses with text and images
     /// <param name="text">The user message text.</param>
     /// <param name="images">Image URLs or base64 data URLs.</param>
     /// <param name="mcpServerUrl">URL of the MCP server that supplies tools.</param>
@@ -337,35 +260,16 @@ public sealed class Agent : IAsyncDisposable
         string? model = null, CancellationToken ct = default)
     {
         Emit(AgentEventKind.UserInput, text: text);
-        if (Context?.ShouldCompact == true) await CompactAsync(ct: ct);
-
-        var instructions       = Context?.GetEffectiveSystemPrompt(Options.SystemPrompt) ?? Options.SystemPrompt;
         var tools              = BuildToolDefinitions(mcpServerUrl, serverLabel, allowedTools, mcpHeaders);
         var effectiveReasoning = reasoning ?? Options.Reasoning;
         var effectiveModel     = model ?? Options.Model;
         var effectiveInference = inference ?? Options.Inference;
         var userInput          = ResponseInput.User(text, images);
-        EmitRequestContext(instructions, tools);
-
-        AgentResponse response;
-        if (Context is not null && _lastResponseId is null && Context.IsCheckpointed)
-        {
-            var inputs = Context.GetHotTailAsInput();
-            inputs.Add(userInput);
-            response = await ConsumeStreamAsync(_lm.RespondStreamingAsync(inputs,
-                instructions: instructions, inference: effectiveInference,
-                tools: tools, reasoning: effectiveReasoning, model: effectiveModel, ct: ct));
-        }
-        else
-        {
-            response = await ConsumeStreamAsync(_lm.RespondStreamingAsync([userInput],
-                instructions: instructions, previousResponseId: _lastResponseId,
-                inference: effectiveInference, tools: tools, reasoning: effectiveReasoning,
-                model: effectiveModel, ct: ct));
-        }
-
-        RecordResponse(text, response);
-        return response;
+        EmitRequestContext(Options.SystemPrompt, tools);
+        return await ConsumeStreamAsync(_lm.RespondStreamingAsync([userInput],
+            instructions: Options.SystemPrompt, previousResponseId: _lastResponseId,
+            inference: effectiveInference, tools: tools, reasoning: effectiveReasoning,
+            model: effectiveModel, ct: ct));
     }
 
     // ── Workflow execution ────────────────────────────────────────────────
@@ -621,20 +525,6 @@ public sealed class Agent : IAsyncDisposable
         return new() { Text = ft, ToolInvocations = invocations, Usage = response.Usage };
     }
 
-    private void RecordResponse(string input, AgentResponse response)
-    {
-        if (Context is null) return;
-        Context.RecordUserInput(input);
-        foreach (var inv in response.ToolInvocations)
-        {
-            Context.RecordToolCall(inv.Name, inv.Arguments);
-            Context.RecordToolResult(inv.Name, inv.Result);
-        }
-        Context.RecordAssistantResponse(response.Text);
-        if (response.Usage is not null)
-            Context.UpdateTokenUsage(response.Usage.InputTokens, response.Usage.OutputTokens, response.Usage.TotalTokens);
-    }
-
     private void Emit(AgentEventKind kind, string? text = null, string? toolName = null, string? args = null)
         => EmitCore(new() { Kind = kind, Text = text, ToolName = toolName, Arguments = args });
 
@@ -721,9 +611,6 @@ public sealed class Agent : IAsyncDisposable
                 break;
             case AgentEventKind.WorkflowCompleted:
                 Options.Logger.LogInformation("WORKFLOW_COMPLETED: {Workflow}", e.Text);
-                break;
-            case AgentEventKind.Compacted:
-                Options.Logger.LogInformation("COMPACTED: {Summary}", e.Text);
                 break;
             case AgentEventKind.TextDelta:
                 Options.Logger.LogTrace("DELTA: {Text}", e.Text);

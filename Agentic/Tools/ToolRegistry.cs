@@ -66,6 +66,13 @@ public sealed class ToolRegistry
     /// </summary>
     public JsonSerializerOptions? JsonOptions { get; set; }
 
+    // Fallback options that tolerate string-encoded numbers (e.g. pageIndex="0" from some LLMs)
+    private static readonly JsonSerializerOptions s_defaultJsonOptions = new()
+    {
+        NumberHandling = System.Text.Json.Serialization.JsonNumberHandling.AllowReadingFromString,
+        PropertyNameCaseInsensitive = true,
+    };
+
     /// <summary>
     /// Registers all <see cref="ToolAttribute"/>-decorated methods from <paramref name="toolSet"/>.
     /// </summary>
@@ -154,7 +161,7 @@ public sealed class ToolRegistry
             if (p.ParameterType == typeof(CancellationToken))  { args[i] = ct; continue; }
             if (p.ParameterType == typeof(ToolContext))         { args[i] = context ?? ToolContext.Empty; continue; }
             if (arguments.HasValue && arguments.Value.TryGetProperty(p.Name!, out var prop))
-                args[i] = JsonSerializer.Deserialize(prop.GetRawText(), p.ParameterType, jsonOptions);
+                args[i] = JsonSerializer.Deserialize(prop.GetRawText(), p.ParameterType, jsonOptions ?? s_defaultJsonOptions);
             else if (p.HasDefaultValue) args[i] = p.DefaultValue;
             else args[i] = p.ParameterType.IsValueType ? Activator.CreateInstance(p.ParameterType) : null;
         }
