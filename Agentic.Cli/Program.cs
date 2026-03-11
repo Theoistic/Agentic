@@ -1,56 +1,60 @@
 ﻿using Agentic;
 using Agentic.Cli;
-using Agentic.Mcp;
-using Agentic.Storage;
+using Microsoft.Extensions.DependencyInjection;
+using Mantle = Agentic.Runtime.Mantle;
 
 Console.OutputEncoding = System.Text.Encoding.UTF8;
 
-// ── MCP host ──────────────────────────────────────────────────────────────
-var builder = WebApplication.CreateBuilder([]);
-builder.Logging.SetMinimumLevel(LogLevel.None);
-builder.Logging.AddFilter("Agentic.Mcp", LogLevel.Information);
-builder.Logging.AddSimpleConsole(o => { o.SingleLine = true; o.TimestampFormat = "HH:mm:ss "; });
-builder.WebHost.UseUrls("http://127.0.0.1:5100");
-builder.Services.AddAgenticMcp(opt => opt.ApiKey = "dev-secret-key-1234");
-builder.Services.AddStore(builder.Configuration);
+//var backendDirectory = Environment.GetEnvironmentVariable("AGENTIC_NATIVE_BACKEND_DIR");
+//var modelPath = Environment.GetEnvironmentVariable("AGENTIC_NATIVE_MODEL_PATH");
 
-var config = new LMConfig {
-    ModelName      = "qwen3.5-9b",
-    EmbeddingModel = "text-embedding-embeddinggemma-300m-qat",
-    Endpoint       = "http://127.0.0.1:1234"
+const string backendDirectory = @"C:\Users\theo\Downloads\llama-b8250-bin-win-cuda-12.4-x64";
+const string modelPath = @"C:\Users\theo\.lmstudio\models\lmstudio-community\Qwen3.5-9B-GGUF\Qwen3.5-9B-Q4_K_M.gguf";
+
+if (string.IsNullOrWhiteSpace(backendDirectory) || string.IsNullOrWhiteSpace(modelPath))
+{
+    ConsoleHelper.PrintBanner("Agentic CLI  ·  Native Local Tools");
+    Console.WriteLine();
+    ConsoleHelper.Write(ConsoleColor.Yellow, "Set these environment variables before running the CLI:\n");
+    ConsoleHelper.WriteDim("  AGENTIC_NATIVE_BACKEND_DIR  → path to the llama.cpp backend binaries");
+    ConsoleHelper.WriteDim("  AGENTIC_NATIVE_MODEL_PATH   → path to the GGUF model file");
+    return;
+}
+
+var sessionOptions = new Mantle.LmSessionOptions
+{
+    BackendDirectory = backendDirectory,
+    ModelPath = modelPath,
+    ToolRegistry = new Mantle.ToolRegistry(),
+    Compaction = new Mantle.ConversationCompactionOptions(4096, ReservedForGeneration: 256),
+    DefaultRequest = new Mantle.ResponseRequest
+    {
+        MaxOutputTokens = 1024,
+        EnableThinking = false,
+    },
+    ContextTokens = 8192,
+    ResetContextTokens = 4096,
+    BatchTokens = 1024,
+    MicroBatchTokens = 1024,
+    MaxToolRounds = 32,
 };
 
-using var lm  = new OpenAIBackend(config);
-var app       = builder.Build();
-app.UseStaticFiles();
-app.MapMcpServer("/mcp");
-await app.StartAsync();
+await using var lm = new NativeBackend(sessionOptions, Path.GetFileNameWithoutExtension(modelPath));
 
-var mcpOptions = app.Services.GetRequiredService<McpServerOptions>();
-var mcpUrl     = app.GetMcpUrl();
-if (mcpOptions.ApiKey is not null)
-    mcpUrl = $"{mcpUrl}?key={Uri.EscapeDataString(mcpOptions.ApiKey)}";
+IScenario scenario = new NativeLocalToolsScenario();
+using var services = new ServiceCollection().BuildServiceProvider();
 
-// ── Scenario ──────────────────────────────────────────────────────────────
-IScenario scenario = new HsCodeAnalyzerScenario();
-
-// ── Banner ────────────────────────────────────────────────────────────────
-ConsoleHelper.PrintBanner($"Agentic CLI  ·  {scenario.Name}  ·  {mcpUrl}");
+ConsoleHelper.PrintBanner($"Agentic CLI  ·  {scenario.Name}  ·  {Path.GetFileName(modelPath)}");
 Console.WriteLine();
+ConsoleHelper.WriteDim($"Backend: {backendDirectory}");
+ConsoleHelper.WriteDim($"Model:   {modelPath}");
 
-var wwwroot    = app.Environment.WebRootPath ?? Path.Combine(app.Environment.ContentRootPath, "wwwroot");
-var staticBase = app.Urls.FirstOrDefault() ?? "http://127.0.0.1:5100";
-ConsoleHelper.WriteDim($"Static: {staticBase}/  →  {wwwroot}");
-
-// ── LM health check ───────────────────────────────────────────────────────
-Console.Write("  LM server  ");
+Console.Write("  Native backend  ");
 if (await lm.PingAsync())
     ConsoleHelper.Write(ConsoleColor.Green, "● online\n");
 else
-    ConsoleHelper.Write(ConsoleColor.Red, $"● unreachable at {config.Endpoint}\n");
+    ConsoleHelper.Write(ConsoleColor.Red, "● failed to initialize\n");
 
 Console.WriteLine();
 
-await scenario.RunAsync(lm, app.Services, mcpUrl);
-
-await app.StopAsync();
+await scenario.RunAsync(lm, services);

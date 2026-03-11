@@ -12,6 +12,7 @@ public sealed class NativeBackend : ILLMBackend, IAsyncDisposable, IDisposable
     private readonly Mantle.LmSessionOptions _sessionOptions;
     private readonly string _defaultModel;
     private readonly SemaphoreSlim _sessionLock = new(1, 1);
+    private readonly HashSet<string> _projectedLocalToolNames = new(StringComparer.Ordinal);
 
     private Mantle.LmSession? _session;
     private bool _disposed;
@@ -187,34 +188,39 @@ public sealed class NativeBackend : ILLMBackend, IAsyncDisposable, IDisposable
         string? model,
         bool stream)
     {
-        ValidateUnsupportedFeatures(input, inference, tools, reasoning);
+        ValidateUnsupportedFeatures(input);
+        SynchronizeLocalTools(tools);
 
         return new Mantle.ResponseRequest
         {
             Model = ResolveModel(model),
             Input = ConvertInput(input),
             Instructions = instructions,
-            Tools = CreateToolDefinitions(),
+            Tools = CreateToolDefinitions(tools),
             PreviousResponseId = previousResponseId,
-            Stream = stream
+            Stream = stream,
+            Temperature = inference?.Temperature is double temperature ? (float)temperature : null,
+            TopP = inference?.TopP is double topP ? (float)topP : null,
+            TopK = inference?.TopK,
+            PresencePenalty = inference?.PresencePenalty is double presencePenalty ? (float)presencePenalty : null,
+            RepetitionPenalty = inference?.RepetitionPenalty is double repetitionPenalty ? (float)repetitionPenalty : null,
+            EnableThinking = reasoning switch
+            {
+                null => null,
+                ReasoningEffort.None => false,
+                _ => true,
+            },
+            ReasoningEffort = reasoning switch
+            {
+                null => null,
+                ReasoningEffort.None => "none",
+                _ => reasoning.Value.ToString().ToLowerInvariant(),
+            }
         };
     }
 
-    private static void ValidateUnsupportedFeatures(
-        IEnumerable<ResponseInput> input,
-        InferenceConfig? inference,
-        List<ToolDefinition>? tools,
-        ReasoningEffort? reasoning)
+    private static void ValidateUnsupportedFeatures(IEnumerable<ResponseInput> input)
     {
-        if (tools is { Count: > 0 })
-            throw new NotSupportedException("NativeBackend does not support OpenAI-style MCP tool definitions. Configure tools on the native session tool registry instead.");
-
-        if (inference is not null)
-            throw new NotSupportedException("NativeBackend does not support per-request inference overrides. Configure inference on the native session options instead.");
-
-        if (reasoning is not null)
-            throw new NotSupportedException("NativeBackend does not support per-request reasoning overrides. Configure thinking behavior on the native session inference options instead.");
-
         foreach (var item in input)
         {
             if (item.Content is IEnumerable<ResponseInputContent> parts && parts.OfType<InputImageContent>().Any())
@@ -222,26 +228,77 @@ public sealed class NativeBackend : ILLMBackend, IAsyncDisposable, IDisposable
         }
     }
 
-    private IReadOnlyList<Mantle.ResponseToolDefinition>? CreateToolDefinitions()
+    private void SynchronizeLocalTools(List<ToolDefinition>? tools)
     {
-        var tools = _sessionOptions.ToolRegistry.ToList();
-        if (tools.Count == 0)
+        var nextLocalNames = new HashSet<string>(StringComparer.Ordinal);
+
+        foreach (var tool in tools?.Where(tool => string.Equals(tool.Type, "function", StringComparison.OrdinalIgnoreCase)
+                                               && !string.IsNullOrWhiteSpace(tool.Name)
+                                               && tool.LocalInvoker is not null)
+                              ?? [])
+        {
+            nextLocalNames.Add(tool.Name!);
+            _sessionOptions.ToolRegistry.Register(new Mantle.AgentTool(
+                tool.Name!,
+                tool.Description ?? string.Empty,
+                CreateNativeParameters(tool.Parameters),
+                args => InvokeLocalTool(tool, args)));
+        }
+
+        foreach (var staleTool in _projectedLocalToolNames.Except(nextLocalNames).ToList())
+            _sessionOptions.ToolRegistry.Remove(staleTool);
+
+        _projectedLocalToolNames.Clear();
+        foreach (var name in nextLocalNames)
+            _projectedLocalToolNames.Add(name);
+    }
+
+    private static IReadOnlyList<Mantle.ResponseToolDefinition>? CreateToolDefinitions(List<ToolDefinition>? tools)
+    {
+        if (tools is not { Count: > 0 })
             return null;
 
-        return [..
-            tools.Select(tool => new Mantle.ResponseToolDefinition(
-                Type: "function",
-                Name: tool.Name,
-                Parameters: new
-                {
-                    type = "object",
-                    properties = tool.Parameters.ToDictionary(
-                        parameter => parameter.Name,
-                        parameter => (object)new { type = parameter.Type, description = parameter.Description },
-                        StringComparer.Ordinal),
-                    required = tool.Parameters.Where(parameter => parameter.Required).Select(parameter => parameter.Name).ToArray()
-                },
-                Description: tool.Description))];
+        return [.. tools.Select(tool => new Mantle.ResponseToolDefinition(
+            Type: tool.Type,
+            Name: tool.Name ?? string.Empty,
+            Parameters: tool.Parameters ?? ToolSchema.Parse("""{"type":"object"}"""),
+            Description: tool.Description,
+            ServerLabel: tool.ServerLabel,
+            ServerUrl: tool.ServerUrl,
+            AllowedTools: tool.AllowedTools,
+            Headers: tool.Headers))];
+    }
+
+    private static IReadOnlyList<Mantle.ToolParameter> CreateNativeParameters(JsonElement? schema)
+    {
+        if (schema is not { ValueKind: JsonValueKind.Object } schemaObject)
+            return [];
+
+        var required = schemaObject.TryGetProperty("required", out var requiredElement) && requiredElement.ValueKind == JsonValueKind.Array
+            ? requiredElement.EnumerateArray().Select(item => item.GetString()).Where(name => !string.IsNullOrWhiteSpace(name)).ToHashSet(StringComparer.Ordinal)
+            : new HashSet<string>(StringComparer.Ordinal);
+
+        if (!schemaObject.TryGetProperty("properties", out var properties) || properties.ValueKind != JsonValueKind.Object)
+            return [];
+
+        var parameters = new List<Mantle.ToolParameter>();
+        foreach (var property in properties.EnumerateObject())
+        {
+            var definition = property.Value;
+            var type = definition.TryGetProperty("type", out var typeElement) ? typeElement.GetString() ?? "string" : "string";
+            var description = definition.TryGetProperty("description", out var descriptionElement) ? descriptionElement.GetString() ?? string.Empty : string.Empty;
+            parameters.Add(new Mantle.ToolParameter(property.Name, type, description, required.Contains(property.Name)));
+        }
+        return parameters;
+    }
+
+    private static string InvokeLocalTool(ToolDefinition tool, IReadOnlyDictionary<string, object?> args)
+    {
+        if (tool.LocalInvoker is null)
+            return $"Error: tool '{tool.Name}' does not have a local handler.";
+
+        var arguments = ToolSchema.SerializeToElement(args);
+        return tool.LocalInvoker(arguments, CancellationToken.None).GetAwaiter().GetResult();
     }
 
     private static IReadOnlyList<Mantle.ResponseItem> ConvertInput(IEnumerable<ResponseInput> input)

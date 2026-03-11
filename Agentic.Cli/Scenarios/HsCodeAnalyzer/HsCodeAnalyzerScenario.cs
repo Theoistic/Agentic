@@ -439,7 +439,7 @@ public sealed class HsCodeAnalyzerScenario : IScenario
 
     public string Name => "HS Code Analyzer";
 
-    public async Task RunAsync(ILLMBackend lm, IServiceProvider services, string mcpUrl)
+    public async Task RunAsync(ILLMBackend lm, IServiceProvider services, string? mcpUrl = null)
     {
         var toolRegistry = services.GetRequiredService<ToolRegistry>();
         var store        = services.GetRequiredService<IStore>();

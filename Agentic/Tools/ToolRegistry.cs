@@ -102,6 +102,14 @@ public sealed class ToolRegistry
         _tools.Values.Select(t => new AgentToolDescriptor
         { Name = t.Name, Description = t.Description, ParameterSchema = t.ParameterSchema }).ToList();
 
+    /// <summary>Projects all registered tools into generic tool definitions consumable by different LM backends.</summary>
+    public IReadOnlyList<ToolDefinition> GetToolDefinitions() =>
+        _tools.Values.Select(t => ToolDefinition.Function(
+            t.Name,
+            t.ParameterSchema ?? ToolSchema.Parse("""{"type":"object"}"""),
+            t.Description,
+            (arguments, ct) => InvokeAsync(t.Name, arguments, ToolContext.Empty, ct))).ToList();
+
     /// <summary>
     /// Invokes the named tool with the provided JSON arguments and returns its string result.
     /// </summary>
@@ -120,9 +128,9 @@ public sealed class ToolRegistry
         {
             await task;
             var tt = task.GetType();
-            return tt.IsGenericType ? tt.GetProperty("Result")!.GetValue(task)?.ToString() ?? "" : "";
+            return tt.IsGenericType ? SerializeToolResult(tt.GetProperty("Result")!.GetValue(task), JsonOptions) : "";
         }
-        return result?.ToString() ?? "";
+        return SerializeToolResult(result, JsonOptions);
     }
 
     private sealed class ReflectedTool
@@ -151,6 +159,18 @@ public sealed class ToolRegistry
             else args[i] = p.ParameterType.IsValueType ? Activator.CreateInstance(p.ParameterType) : null;
         }
         return args;
+    }
+
+    private static string SerializeToolResult(object? result, JsonSerializerOptions? jsonOptions)
+    {
+        if (result is null) return "";
+        if (result is string text) return text;
+        if (result is JsonElement json) return json.GetRawText();
+
+        var type = result.GetType();
+        return type.IsPrimitive || type.IsEnum || result is decimal or Guid or Uri or DateTime or DateTimeOffset or DateOnly or TimeOnly or TimeSpan
+            ? result.ToString() ?? ""
+            : JsonSerializer.Serialize(result, type, jsonOptions);
     }
 
     private static JsonElement? BuildSchema(ParameterInfo[] parameters)

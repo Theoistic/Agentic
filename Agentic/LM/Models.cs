@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace Agentic;
@@ -6,12 +7,24 @@ namespace Agentic;
 //  /v1/responses models
 // ═══════════════════════════════════════════════════════════════════════════
 
-/// <summary>Describes a tool source available to the model, typically an MCP server endpoint.</summary>
+/// <summary>Describes a tool available to the model, either as a direct function or an MCP server binding.</summary>
 public sealed class ToolDefinition
 {
-    /// <summary>The tool type discriminator. Defaults to <c>"mcp"</c>.</summary>
+    /// <summary>The tool type discriminator. Supported values include <c>"function"</c> and <c>"mcp"</c>.</summary>
     [JsonPropertyName("type")] 
-    public string Type { get; set; } = "mcp";
+    public string Type { get; set; } = "function";
+
+    /// <summary>The function tool name exposed to the model when <see cref="Type"/> is <c>"function"</c>.</summary>
+    [JsonPropertyName("name"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Name { get; set; }
+
+    /// <summary>Human-readable description of the tool.</summary>
+    [JsonPropertyName("description"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Description { get; set; }
+
+    /// <summary>JSON Schema describing the function parameters when <see cref="Type"/> is <c>"function"</c>.</summary>
+    [JsonPropertyName("parameters"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public JsonElement? Parameters { get; set; }
 
     /// <summary>A short label identifying this MCP server to the model.</summary>
     [JsonPropertyName("server_label"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
@@ -29,13 +42,32 @@ public sealed class ToolDefinition
     [JsonPropertyName("headers"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public Dictionary<string, string>? Headers { get; set; }
 
+    /// <summary>Optional local executor used by backends that can invoke tools directly.</summary>
+    [JsonIgnore]
+    public Func<JsonElement?, CancellationToken, Task<string>>? LocalInvoker { get; set; }
+
+    /// <summary>Creates a direct function tool definition.</summary>
+    public static ToolDefinition Function(
+        string name,
+        JsonElement? parameters = null,
+        string? description = null,
+        Func<JsonElement?, CancellationToken, Task<string>>? localInvoker = null) =>
+        new()
+        {
+            Type = "function",
+            Name = name,
+            Description = description,
+            Parameters = parameters,
+            LocalInvoker = localInvoker,
+        };
+
     /// <summary>Creates an MCP-type tool definition.</summary>
     /// <param name="label">Short label identifying the server.</param>
     /// <param name="url">Base URL of the MCP server.</param>
     /// <param name="allowed">Optional tool allow-list.</param>
     /// <param name="headers">Optional HTTP headers.</param>
     public static ToolDefinition Mcp(string label, string url, List<string>? allowed = null, Dictionary<string, string>? headers = null) =>
-        new() { ServerLabel = label, ServerUrl = url, AllowedTools = allowed, Headers = headers };
+        new() { Type = "mcp", ServerLabel = label, ServerUrl = url, AllowedTools = allowed, Headers = headers };
 }
 
 /// <summary>Request body sent to the <c>/v1/responses</c> endpoint.</summary>

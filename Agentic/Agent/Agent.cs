@@ -73,7 +73,7 @@ public sealed class Agent : IAsyncDisposable
     /// <param name="model">Per-call model override. Accepts a named alias from <see cref="LMConfig.Models"/> or a literal model ID; <c>null</c> falls back to <see cref="AgentOptions.Model"/> then <see cref="LMConfig.ModelName"/>.</param>
     /// <param name="ct">Cancellation token.</param>
     public async Task<AgentResponse> RunAsync(
-        string input, string mcpServerUrl, string? serverLabel = null,
+        string input, string? mcpServerUrl = null, string? serverLabel = null,
         List<string>? allowedTools = null, Dictionary<string, string>? mcpHeaders = null,
         ReasoningEffort? reasoning = null, InferenceConfig? inference = null,
         string? model = null, CancellationToken ct = default)
@@ -81,7 +81,7 @@ public sealed class Agent : IAsyncDisposable
         Emit(AgentEventKind.UserInput, text: input);
         var effectiveModel     = model ?? Options.Model;
         var effectiveInference = inference ?? Options.Inference;
-        var tools              = new List<ToolDefinition> { ToolDefinition.Mcp(serverLabel ?? "agentic", mcpServerUrl, allowedTools, mcpHeaders) };
+        var tools              = BuildToolDefinitions(mcpServerUrl, serverLabel, allowedTools, mcpHeaders);
         EmitRequestContext(Options.SystemPrompt, tools);
         var resp = await _lm.RespondAsync(input,
             instructions: Options.SystemPrompt, inference: effectiveInference,
@@ -102,7 +102,7 @@ public sealed class Agent : IAsyncDisposable
     /// <param name="model">Per-call model override. Accepts a named alias from <see cref="LMConfig.Models"/> or a literal model ID; <c>null</c> falls back to <see cref="AgentOptions.Model"/> then <see cref="LMConfig.ModelName"/>.</param>
     /// <param name="ct">Cancellation token.</param>
     public async Task<AgentResponse> RunAsync(
-        string text, IEnumerable<string> images, string mcpServerUrl, string? serverLabel = null,
+        string text, IEnumerable<string> images, string? mcpServerUrl = null, string? serverLabel = null,
         List<string>? allowedTools = null, Dictionary<string, string>? mcpHeaders = null,
         ReasoningEffort? reasoning = null, InferenceConfig? inference = null,
         string? model = null, CancellationToken ct = default)
@@ -110,7 +110,7 @@ public sealed class Agent : IAsyncDisposable
         Emit(AgentEventKind.UserInput, text: text);
         var effectiveModel     = model ?? Options.Model;
         var effectiveInference = inference ?? Options.Inference;
-        var tools              = new List<ToolDefinition> { ToolDefinition.Mcp(serverLabel ?? "agentic", mcpServerUrl, allowedTools, mcpHeaders) };
+        var tools              = BuildToolDefinitions(mcpServerUrl, serverLabel, allowedTools, mcpHeaders);
         EmitRequestContext(Options.SystemPrompt, tools);
         var resp = await _lm.RespondAsync([ResponseInput.User(text, images)],
             instructions: Options.SystemPrompt, inference: effectiveInference,
@@ -130,7 +130,7 @@ public sealed class Agent : IAsyncDisposable
     /// <param name="model">Per-call model override. Accepts a named alias from <see cref="LMConfig.Models"/> or a literal model ID; <c>null</c> falls back to <see cref="AgentOptions.Model"/> then <see cref="LMConfig.ModelName"/>.</param>
     /// <param name="ct">Cancellation token.</param>
     public async Task<AgentResponse> ChatAsync(
-        string input, string mcpServerUrl, string? serverLabel = null,
+        string input, string? mcpServerUrl = null, string? serverLabel = null,
         List<string>? allowedTools = null, Dictionary<string, string>? mcpHeaders = null,
         ReasoningEffort? reasoning = null, InferenceConfig? inference = null,
         string? model = null, CancellationToken ct = default)
@@ -139,7 +139,7 @@ public sealed class Agent : IAsyncDisposable
         if (Context?.ShouldCompact == true) await CompactAsync(ct: ct);
 
         var instructions       = Context?.GetEffectiveSystemPrompt(Options.SystemPrompt) ?? Options.SystemPrompt;
-        var tools              = new List<ToolDefinition> { ToolDefinition.Mcp(serverLabel ?? "agentic", mcpServerUrl, allowedTools, mcpHeaders) };
+        var tools              = BuildToolDefinitions(mcpServerUrl, serverLabel, allowedTools, mcpHeaders);
         var effectiveReasoning = reasoning ?? Options.Reasoning;
         var effectiveModel     = model ?? Options.Model;
         var effectiveInference = inference ?? Options.Inference;
@@ -179,7 +179,7 @@ public sealed class Agent : IAsyncDisposable
     /// <param name="model">Per-call model override. Accepts a named alias from <see cref="LMConfig.Models"/> or a literal model ID; <c>null</c> falls back to <see cref="AgentOptions.Model"/> then <see cref="LMConfig.ModelName"/>.</param>
     /// <param name="ct">Cancellation token.</param>
     public async Task<AgentResponse> ChatAsync(
-        string text, IEnumerable<string> images, string mcpServerUrl, string? serverLabel = null,
+        string text, IEnumerable<string> images, string? mcpServerUrl = null, string? serverLabel = null,
         List<string>? allowedTools = null, Dictionary<string, string>? mcpHeaders = null,
         ReasoningEffort? reasoning = null, InferenceConfig? inference = null,
         string? model = null, CancellationToken ct = default)
@@ -188,7 +188,7 @@ public sealed class Agent : IAsyncDisposable
         if (Context?.ShouldCompact == true) await CompactAsync(ct: ct);
 
         var instructions       = Context?.GetEffectiveSystemPrompt(Options.SystemPrompt) ?? Options.SystemPrompt;
-        var tools              = new List<ToolDefinition> { ToolDefinition.Mcp(serverLabel ?? "agentic", mcpServerUrl, allowedTools, mcpHeaders) };
+        var tools              = BuildToolDefinitions(mcpServerUrl, serverLabel, allowedTools, mcpHeaders);
         var effectiveReasoning = reasoning ?? Options.Reasoning;
         var effectiveModel     = model ?? Options.Model;
         var effectiveInference = inference ?? Options.Inference;
@@ -228,7 +228,7 @@ public sealed class Agent : IAsyncDisposable
     /// <param name="model">Per-call model override. Accepts a named alias from <see cref="LMConfig.Models"/> or a literal model ID; <c>null</c> falls back to <see cref="AgentOptions.Model"/> then <see cref="LMConfig.ModelName"/>.</param>
     /// <param name="ct">Cancellation token.</param>
     public async Task<AgentResponse> RunStreamAsync(
-        string input, string mcpServerUrl, string? serverLabel = null,
+        string input, string? mcpServerUrl = null, string? serverLabel = null,
         List<string>? allowedTools = null, Dictionary<string, string>? mcpHeaders = null,
         ReasoningEffort? reasoning = null, InferenceConfig? inference = null,
         string? model = null, CancellationToken ct = default)
@@ -236,7 +236,7 @@ public sealed class Agent : IAsyncDisposable
         Emit(AgentEventKind.UserInput, text: input);
         var effectiveModel     = model ?? Options.Model;
         var effectiveInference = inference ?? Options.Inference;
-        var tools              = new List<ToolDefinition> { ToolDefinition.Mcp(serverLabel ?? "agentic", mcpServerUrl, allowedTools, mcpHeaders) };
+        var tools              = BuildToolDefinitions(mcpServerUrl, serverLabel, allowedTools, mcpHeaders);
         EmitRequestContext(Options.SystemPrompt, tools);
         return await ConsumeStreamAsync(_lm.RespondStreamingAsync(input,
             instructions: Options.SystemPrompt, inference: effectiveInference,
@@ -256,7 +256,7 @@ public sealed class Agent : IAsyncDisposable
     /// <param name="model">Per-call model override. Accepts a named alias from <see cref="LMConfig.Models"/> or a literal model ID; <c>null</c> falls back to <see cref="AgentOptions.Model"/> then <see cref="LMConfig.ModelName"/>.</param>
     /// <param name="ct">Cancellation token.</param>
     public async Task<AgentResponse> RunStreamAsync(
-        string text, IEnumerable<string> images, string mcpServerUrl, string? serverLabel = null,
+        string text, IEnumerable<string> images, string? mcpServerUrl = null, string? serverLabel = null,
         List<string>? allowedTools = null, Dictionary<string, string>? mcpHeaders = null,
         ReasoningEffort? reasoning = null, InferenceConfig? inference = null,
         string? model = null, CancellationToken ct = default)
@@ -264,7 +264,7 @@ public sealed class Agent : IAsyncDisposable
         Emit(AgentEventKind.UserInput, text: text);
         var effectiveModel     = model ?? Options.Model;
         var effectiveInference = inference ?? Options.Inference;
-        var tools              = new List<ToolDefinition> { ToolDefinition.Mcp(serverLabel ?? "agentic", mcpServerUrl, allowedTools, mcpHeaders) };
+        var tools              = BuildToolDefinitions(mcpServerUrl, serverLabel, allowedTools, mcpHeaders);
         EmitRequestContext(Options.SystemPrompt, tools);
         return await ConsumeStreamAsync(_lm.RespondStreamingAsync([ResponseInput.User(text, images)],
             instructions: Options.SystemPrompt, inference: effectiveInference,
@@ -283,7 +283,7 @@ public sealed class Agent : IAsyncDisposable
     /// <param name="model">Per-call model override. Accepts a named alias from <see cref="LMConfig.Models"/> or a literal model ID; <c>null</c> falls back to <see cref="AgentOptions.Model"/> then <see cref="LMConfig.ModelName"/>.</param>
     /// <param name="ct">Cancellation token.</param>
     public async Task<AgentResponse> ChatStreamAsync(
-        string input, string mcpServerUrl, string? serverLabel = null,
+        string input, string? mcpServerUrl = null, string? serverLabel = null,
         List<string>? allowedTools = null, Dictionary<string, string>? mcpHeaders = null,
         ReasoningEffort? reasoning = null, InferenceConfig? inference = null,
         string? model = null, CancellationToken ct = default)
@@ -292,7 +292,7 @@ public sealed class Agent : IAsyncDisposable
         if (Context?.ShouldCompact == true) await CompactAsync(ct: ct);
 
         var instructions       = Context?.GetEffectiveSystemPrompt(Options.SystemPrompt) ?? Options.SystemPrompt;
-        var tools              = new List<ToolDefinition> { ToolDefinition.Mcp(serverLabel ?? "agentic", mcpServerUrl, allowedTools, mcpHeaders) };
+        var tools              = BuildToolDefinitions(mcpServerUrl, serverLabel, allowedTools, mcpHeaders);
         var effectiveReasoning = reasoning ?? Options.Reasoning;
         var effectiveModel     = model ?? Options.Model;
         var effectiveInference = inference ?? Options.Inference;
@@ -331,7 +331,7 @@ public sealed class Agent : IAsyncDisposable
     /// <param name="model">Per-call model override. Accepts a named alias from <see cref="LMConfig.Models"/> or a literal model ID; <c>null</c> falls back to <see cref="AgentOptions.Model"/> then <see cref="LMConfig.ModelName"/>.</param>
     /// <param name="ct">Cancellation token.</param>
     public async Task<AgentResponse> ChatStreamAsync(
-        string text, IEnumerable<string> images, string mcpServerUrl, string? serverLabel = null,
+        string text, IEnumerable<string> images, string? mcpServerUrl = null, string? serverLabel = null,
         List<string>? allowedTools = null, Dictionary<string, string>? mcpHeaders = null,
         ReasoningEffort? reasoning = null, InferenceConfig? inference = null,
         string? model = null, CancellationToken ct = default)
@@ -340,7 +340,7 @@ public sealed class Agent : IAsyncDisposable
         if (Context?.ShouldCompact == true) await CompactAsync(ct: ct);
 
         var instructions       = Context?.GetEffectiveSystemPrompt(Options.SystemPrompt) ?? Options.SystemPrompt;
-        var tools              = new List<ToolDefinition> { ToolDefinition.Mcp(serverLabel ?? "agentic", mcpServerUrl, allowedTools, mcpHeaders) };
+        var tools              = BuildToolDefinitions(mcpServerUrl, serverLabel, allowedTools, mcpHeaders);
         var effectiveReasoning = reasoning ?? Options.Reasoning;
         var effectiveModel     = model ?? Options.Model;
         var effectiveInference = inference ?? Options.Inference;
@@ -386,7 +386,7 @@ public sealed class Agent : IAsyncDisposable
     /// <param name="maxRounds">Maximum number of model turns before the workflow is aborted.</param>
     /// <param name="ct">Cancellation token.</param>
     public async Task<WorkflowResult> RunWorkflowAsync(
-        Workflow workflow, string input, string mcpServerUrl,
+        Workflow workflow, string input, string? mcpServerUrl = null,
         string? serverLabel = null, List<string>? allowedTools = null,
         Dictionary<string, string>? mcpHeaders = null,
         ReasoningEffort? reasoning = null, InferenceConfig? inference = null,
@@ -398,7 +398,7 @@ public sealed class Agent : IAsyncDisposable
         var allInvocations     = new List<ToolInvocation>();
         var allText            = new StringBuilder();
         var systemPrompt       = BuildWorkflowPrompt(workflow, Options.SystemPrompt);
-        var mcpTools           = new List<ToolDefinition> { ToolDefinition.Mcp(serverLabel ?? "agentic", mcpServerUrl, allowedTools, mcpHeaders) };
+        var mcpTools           = BuildToolDefinitions(mcpServerUrl, serverLabel, allowedTools, mcpHeaders);
         var currentInput       = input;
         var effectiveReasoning = reasoning ?? Options.Reasoning;
         var effectiveModel     = model ?? Options.Model;
@@ -478,14 +478,27 @@ public sealed class Agent : IAsyncDisposable
         return sb.ToString();
     }
 
+    private List<ToolDefinition>? BuildToolDefinitions(
+        string? mcpServerUrl,
+        string? serverLabel,
+        List<string>? allowedTools,
+        Dictionary<string, string>? mcpHeaders)
+    {
+        var tools = Tools.GetToolDefinitions().ToList();
+        if (!string.IsNullOrWhiteSpace(mcpServerUrl))
+            tools.Add(ToolDefinition.Mcp(serverLabel ?? "agentic", mcpServerUrl, allowedTools, mcpHeaders));
+        return tools.Count > 0 ? tools : null;
+    }
+
     // ── Stream consumption ────────────────────────────────────────────────
 
     private async Task<AgentResponse> ConsumeStreamAsync(IAsyncEnumerable<StreamEvent> events)
     {
         var textBuilder = new StringBuilder();
         var invocations = new List<ToolInvocation>();
-        var pendingTools      = new Dictionary<int, string>();  // output_index → tool name
-        var emittedToolCalls  = new HashSet<int>();             // indexes where ToolCall was already fired
+        var pendingMcpTools       = new Dictionary<int, string>();
+        var emittedMcpToolCalls   = new HashSet<int>();
+        var pendingFunctionCalls  = new Dictionary<string, (string Name, string Arguments)>(StringComparer.Ordinal);
         ResponseUsage? usage = null;
 
         await foreach (var evt in events)
@@ -498,15 +511,15 @@ public sealed class Agent : IAsyncDisposable
                     break;
 
                 case "response.output_item.added" when evt.Item?.Type is "mcp_call":
-                    pendingTools[evt.OutputIndex] = evt.Item.Tool ?? evt.Item.Name ?? "";
+                    pendingMcpTools[evt.OutputIndex] = evt.Item.Tool ?? evt.Item.Name ?? "";
                     break;
 
                 // Some LM servers never send this event — handled as a fallback below.
                 case "response.mcp_call.arguments.done":
-                    if (pendingTools.TryGetValue(evt.OutputIndex, out var toolName))
+                    if (pendingMcpTools.TryGetValue(evt.OutputIndex, out var toolName))
                     {
                         Emit(AgentEventKind.ToolCall, toolName: toolName, args: evt.Arguments);
-                        emittedToolCalls.Add(evt.OutputIndex);
+                        emittedMcpToolCalls.Add(evt.OutputIndex);
                     }
                     break;
 
@@ -515,25 +528,37 @@ public sealed class Agent : IAsyncDisposable
                     var ta = evt.Item.Arguments ?? "";
                     var to = UnwrapMcpOutput(evt.Item.Output);
                     // Emit ToolCall here if arguments.done never fired for this index.
-                    if (!emittedToolCalls.Remove(evt.OutputIndex))
+                    if (!emittedMcpToolCalls.Remove(evt.OutputIndex))
                         Emit(AgentEventKind.ToolCall, toolName: tn, args: ta);
                     Emit(AgentEventKind.ToolResult, toolName: tn, text: to);
                     invocations.Add(new() { Name = tn, Arguments = ta, Result = to });
-                    pendingTools.Remove(evt.OutputIndex);
+                    pendingMcpTools.Remove(evt.OutputIndex);
                     break;
 
                 case "response.output_item.done" when evt.Item?.Type is "function_call":
                     var fn = evt.Item.Name ?? ""; var fa = evt.Item.Arguments ?? "";
                     Emit(AgentEventKind.ToolCall, toolName: fn, args: fa);
-                    invocations.Add(new() { Name = fn, Arguments = fa, Result = "" });
+                    if (!string.IsNullOrEmpty(evt.Item.CallId))
+                        pendingFunctionCalls[evt.Item.CallId] = (fn, fa);
+                    else
+                        invocations.Add(new() { Name = fn, Arguments = fa, Result = "" });
+                    break;
+
+                case "response.output_item.done" when evt.Item?.Type is "function_call_output":
+                    CompleteFunctionCall(evt.Item, pendingFunctionCalls, invocations);
                     break;
 
                 case "response.completed":
                     _lastResponseId = evt.Response?.Id ?? evt.Response?.ResponseId;
                     usage = evt.Response?.Usage;
+                    if (evt.Response?.Output is { Count: > 0 })
+                        CompleteFunctionCalls(evt.Response.Output, pendingFunctionCalls, invocations);
                     break;
             }
         }
+
+        foreach (var pending in pendingFunctionCalls.Values)
+            invocations.Add(new() { Name = pending.Name, Arguments = pending.Arguments, Result = "" });
 
         var fullText = textBuilder.ToString();
         EmitCore(new()
@@ -550,6 +575,8 @@ public sealed class Agent : IAsyncDisposable
     {
         var invocations = new List<ToolInvocation>();
         var text = new List<string>();
+        var pendingFunctionCalls = new Dictionary<string, (string Name, string Arguments)>(StringComparer.Ordinal);
+        var unresolvedFunctionCalls = new List<(string Name, string Arguments)>();
 
         foreach (var item in response.Output)
         {
@@ -573,10 +600,22 @@ public sealed class Agent : IAsyncDisposable
                 case "function_call":
                     var fn = item.Name ?? ""; var fa = item.Arguments ?? "";
                     Emit(AgentEventKind.ToolCall, toolName: fn, args: fa);
-                    invocations.Add(new() { Name = fn, Arguments = fa, Result = "" });
+                    if (!string.IsNullOrEmpty(item.CallId))
+                        pendingFunctionCalls[item.CallId] = (fn, fa);
+                    else
+                        unresolvedFunctionCalls.Add((fn, fa));
+                    break;
+                case "function_call_output":
+                    CompleteFunctionCall(item, pendingFunctionCalls, invocations);
                     break;
             }
         }
+
+        foreach (var pending in unresolvedFunctionCalls)
+            invocations.Add(new() { Name = pending.Name, Arguments = pending.Arguments, Result = "" });
+        foreach (var pending in pendingFunctionCalls.Values)
+            invocations.Add(new() { Name = pending.Name, Arguments = pending.Arguments, Result = "" });
+
         var ft = string.Join("", text);
         Emit(AgentEventKind.Answer, text: ft);
         return new() { Text = ft, ToolInvocations = invocations, Usage = response.Usage };
@@ -605,11 +644,39 @@ public sealed class Agent : IAsyncDisposable
         LogEvent(e);
     }
 
-    private void EmitRequestContext(string? instructions, List<ToolDefinition> tools)
+    private void CompleteFunctionCalls(
+        IEnumerable<ResponseOutputItem> items,
+        Dictionary<string, (string Name, string Arguments)> pendingFunctionCalls,
+        List<ToolInvocation> invocations)
+    {
+        foreach (var item in items.Where(item => item.Type == "function_call_output"))
+            CompleteFunctionCall(item, pendingFunctionCalls, invocations);
+    }
+
+    private void CompleteFunctionCall(
+        ResponseOutputItem item,
+        Dictionary<string, (string Name, string Arguments)> pendingFunctionCalls,
+        List<ToolInvocation> invocations)
+    {
+        var result = item.Output ?? "";
+        if (!string.IsNullOrEmpty(item.CallId) && pendingFunctionCalls.Remove(item.CallId, out var pending))
+        {
+            Emit(AgentEventKind.ToolResult, toolName: pending.Name, text: result);
+            invocations.Add(new() { Name = pending.Name, Arguments = pending.Arguments, Result = result });
+            return;
+        }
+
+        if (!string.IsNullOrEmpty(item.CallId))
+            return;
+
+        Emit(AgentEventKind.ToolResult, toolName: item.CallId ?? string.Empty, text: result);
+    }
+
+    private void EmitRequestContext(string? instructions, IReadOnlyList<ToolDefinition>? tools)
     {
         if (!string.IsNullOrEmpty(instructions))
             EmitCore(new() { Kind = AgentEventKind.SystemPrompt, Text = instructions });
-        foreach (var t in tools)
+        foreach (var t in tools?.Where(t => string.Equals(t.Type, "mcp", StringComparison.OrdinalIgnoreCase)) ?? [])
             EmitCore(new()
             {
                 Kind         = AgentEventKind.ToolDeclaration,

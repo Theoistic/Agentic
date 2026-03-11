@@ -125,6 +125,11 @@ public sealed class ToolRegistry : IEnumerable<AgentTool>
     private readonly Dictionary<string, AgentTool> _tools = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
+    /// Gets the number of registered tools.
+    /// </summary>
+    public int Count => _tools.Count;
+
+    /// <summary>
     /// Adds a tool for collection-initializer scenarios.
     /// </summary>
     public void Add(AgentTool tool) => Register(tool);
@@ -133,6 +138,16 @@ public sealed class ToolRegistry : IEnumerable<AgentTool>
     /// Registers or replaces a tool by name.
     /// </summary>
     public void Register(AgentTool tool) => _tools[tool.Name] = tool;
+
+    /// <summary>
+    /// Removes a tool by name.
+    /// </summary>
+    public bool Remove(string name) => _tools.Remove(name);
+
+    /// <summary>
+    /// Removes all registered tools.
+    /// </summary>
+    public void Clear() => _tools.Clear();
 
     /// <summary>
     /// Attempts to resolve a tool by name.

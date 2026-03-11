@@ -12,13 +12,13 @@ public sealed class AgenticRepl
     private static readonly HttpClient s_http = new();
 
     private readonly Agent  _agent;
-    private readonly string _mcpUrl;
+    private readonly string? _mcpUrl;
 
     private bool _inTextStream;
     private bool _atLineStart   = true;
     private bool _hadToolEvents;
 
-    public AgenticRepl(Agent agent, string mcpUrl)
+    public AgenticRepl(Agent agent, string? mcpUrl = null)
     {
         _agent         = agent;
         _mcpUrl        = mcpUrl;
@@ -83,7 +83,10 @@ public sealed class AgenticRepl
                     var dataUrl = File.Exists(target)
                         ? InputImageContent.FromFile(target).ImageUrl!
                         : await ToDataUrlAsync(target);
-                    await _agent.ChatStreamAsync(prompt, [dataUrl], _mcpUrl);
+                    if (string.IsNullOrWhiteSpace(_mcpUrl))
+                        await _agent.ChatStreamAsync(prompt, [dataUrl]);
+                    else
+                        await _agent.ChatStreamAsync(prompt, [dataUrl], _mcpUrl);
                 }
                 catch (Exception ex) { ConsoleHelper.Write(ConsoleColor.Red, $"[img error] {ex.Message}\n"); }
                 continue;
@@ -92,7 +95,10 @@ public sealed class AgenticRepl
             Console.WriteLine();
             try
             {
-                await _agent.ChatStreamAsync(input, _mcpUrl);
+                if (string.IsNullOrWhiteSpace(_mcpUrl))
+                    await _agent.ChatStreamAsync(input);
+                else
+                    await _agent.ChatStreamAsync(input, _mcpUrl);
             }
             catch (LMException ex) when (ex.StatusCode == 0)
             {
