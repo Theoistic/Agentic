@@ -10,12 +10,16 @@ Console.OutputEncoding = System.Text.Encoding.UTF8;
 var modelPath = Environment.GetEnvironmentVariable("AGENTIC_NATIVE_MODEL_PATH")
     ?? @"C:\Users\Theo\.lmstudio\models\lmstudio-community\Qwen3.5-9B-GGUF\Qwen3.5-9B-Q4_K_M.gguf";
 
+var embedModelPath = Environment.GetEnvironmentVariable("AGENTIC_EMBED_MODEL_PATH")
+    ?? @"C:\Users\Theo\.lmstudio\models\lmstudio-community\embeddinggemma-300m-qat-GGUF\embeddinggemma-300m-qat-Q4_0.gguf";
+
 if (string.IsNullOrWhiteSpace(modelPath))
 {
     ConsoleHelper.PrintBanner("Agentic CLI  ·  Native Local Tools");
     Console.WriteLine();
-    ConsoleHelper.Write(ConsoleColor.Yellow, "Set this environment variable before running the CLI:\n");
-    ConsoleHelper.WriteDim("  AGENTIC_NATIVE_MODEL_PATH   → path to the GGUF model file");
+    ConsoleHelper.Write(ConsoleColor.Yellow, "Set these environment variables before running the CLI:\n");
+    ConsoleHelper.WriteDim("  AGENTIC_NATIVE_MODEL_PATH   → path to the chat GGUF model file");
+    ConsoleHelper.WriteDim("  AGENTIC_EMBED_MODEL_PATH    → path to the embedding GGUF model file (optional)");
     return;
 }
 
@@ -44,9 +48,30 @@ var sessionOptions = new Mantle.LmSessionOptions
     MaxToolRounds = 32,
 };
 
-await using var lm = new NativeBackend(sessionOptions, backend, cudaVersion: cudaVersion, releaseTag: releaseTag,
-    installProgress: new Progress<(string message, double percent)>(p => Console.Write($"\r  [{p.percent,3:F0}%] {p.message,-60}")),
+var installProgress = new Progress<(string message, double percent)>(
+    p => Console.Write($"\r  [{p.percent,3:F0}%] {p.message,-60}"));
+
+await using var chatBackend = new NativeBackend(sessionOptions, backend, cudaVersion: cudaVersion, releaseTag: releaseTag,
+    installProgress: installProgress,
     modelName: Path.GetFileNameWithoutExtension(modelPath));
+
+var embedSessionOptions = new Mantle.LmSessionOptions
+{
+    ModelPath = embedModelPath,
+    ToolRegistry = new Mantle.ToolRegistry(),
+    Compaction = new Mantle.ConversationCompactionOptions(2048, ReservedForGeneration: 0),
+    ContextTokens = 2048,
+    BatchTokens = 512,
+    MicroBatchTokens = 512,
+};
+
+await using var embedBackend = new NativeBackend(embedSessionOptions, backend, cudaVersion: cudaVersion, releaseTag: releaseTag,
+    installProgress: installProgress,
+    modelName: Path.GetFileNameWithoutExtension(embedModelPath));
+
+await using var lm = new BackendRouter()
+    .Add(Path.GetFileNameWithoutExtension(modelPath), chatBackend, isDefault: true)
+    .Add(Path.GetFileNameWithoutExtension(embedModelPath), embedBackend, isEmbedding: true);
 
 IScenario scenario = new HsCodeAnalyzerScenario();
 using var services = new ServiceCollection()
@@ -55,13 +80,14 @@ using var services = new ServiceCollection()
 
 ConsoleHelper.PrintBanner($"Agentic CLI  ·  {scenario.Name}  ·  {Path.GetFileName(modelPath)}");
 Console.WriteLine();
-ConsoleHelper.WriteDim($"Model:   {modelPath}");
+ConsoleHelper.WriteDim($"Chat:    {modelPath}");
+ConsoleHelper.WriteDim($"Embed:   {embedModelPath}");
 
 Console.Write("  Native backend  ");
 if (await lm.PingAsync())
 {
     ConsoleHelper.Write(ConsoleColor.Green, "● online\n");
-    ConsoleHelper.WriteDim($"Runtime: {lm.BackendDirectory}");
+    ConsoleHelper.WriteDim($"Runtime: {chatBackend.BackendDirectory}");
 }
 else
     ConsoleHelper.Write(ConsoleColor.Red, "● failed to initialize\n");

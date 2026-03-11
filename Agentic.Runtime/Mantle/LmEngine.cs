@@ -23,7 +23,7 @@ public sealed class LmEngine : IAsyncDisposable, IDisposable
     private readonly Random _random;
     private readonly int _nBatch;
 
-    private readonly string _template;
+    private readonly string? _template;
     private readonly string? _bosToken;
     private readonly string _imageToken;
 
@@ -37,12 +37,17 @@ public sealed class LmEngine : IAsyncDisposable, IDisposable
     public string? VisionDisabledReason { get; }
     public string ImageToken => _imageToken;
 
+    /// <summary>
+    /// True when the loaded model has no chat template and can only produce embeddings.
+    /// </summary>
+    public bool IsEmbeddingOnly => _template is null;
+
     private LmEngine(
         LmSessionOptions options,
         Llama.Model model,
         Llama.Context context,
         Llama.Vision.Context visionContext,
-        string template,
+        string? template,
         string? bosToken,
         string? visionDisabledReason,
         int nBatch,
@@ -76,8 +81,7 @@ public sealed class LmEngine : IAsyncDisposable, IDisposable
             Llama.Init(options.BackendDirectory, options.Logger);
 
             var metadata = GgufReader.ReadMetadata(options.ModelPath);
-            string template = GgufReader.GetString(metadata, "tokenizer.chat_template")
-                ?? throw new InvalidOperationException("No chat template found in GGUF metadata.");
+            string? template = GgufReader.GetString(metadata, "tokenizer.chat_template");
             string? bosToken = GgufReader.ResolveTokenById(metadata, "tokenizer.ggml.bos_token_id");
 
             var model = Llama.LoadModel(
@@ -89,7 +93,10 @@ public sealed class LmEngine : IAsyncDisposable, IDisposable
             // Resolve vision projector path before context creation so we can
             // inflate n_batch when vision will be active. Image token chunks
             // are decoded in a single llama_decode call and must fit within n_batch.
-            string mmprojPath = ResolveMmprojPath(options.ModelPath, options.MmprojPath);
+            // Embedding-only models (no chat template) never use vision.
+            string mmprojPath = template is not null
+                ? ResolveMmprojPath(options.ModelPath, options.MmprojPath)
+                : string.Empty;
             int nBatch = !string.IsNullOrEmpty(mmprojPath)
                 ? Math.Max(options.BatchTokens, options.VisionImageMaxTokens)
                 : options.BatchTokens;
@@ -160,6 +167,9 @@ public sealed class LmEngine : IAsyncDisposable, IDisposable
     /// </summary>
     public string RenderPrompt(IReadOnlyList<ChatMessage> messages, ResponseRequest request)
     {
+        if (_template is null)
+            throw new InvalidOperationException("Cannot render a chat prompt: the loaded model has no chat template (embedding-only model).");
+
         ValidateMessages(messages);
         var ctx = new Dictionary<string, object?>(StringComparer.Ordinal)
         {
@@ -398,10 +408,10 @@ public sealed class LmEngine : IAsyncDisposable, IDisposable
             .FirstOrDefault(f => Path.GetFileName(f).Contains("mmproj", StringComparison.OrdinalIgnoreCase)) ?? string.Empty;
     }
 
-    private static string InferImageToken(string template)
+    private static string InferImageToken(string? template)
     {
         const string qwenVisionToken = "<|vision_start|><|image_pad|><|vision_end|>";
-        return template.Contains(qwenVisionToken, StringComparison.Ordinal) ? qwenVisionToken : string.Empty;
+        return template?.Contains(qwenVisionToken, StringComparison.Ordinal) == true ? qwenVisionToken : string.Empty;
     }
 
     private static void ValidateMessages(IReadOnlyList<ChatMessage> messages)
