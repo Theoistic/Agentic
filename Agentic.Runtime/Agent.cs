@@ -63,7 +63,7 @@ public sealed class Agent : IAsyncDisposable, IDisposable
 
     private Mantle.LmSession? _session;
     private Mantle.ResponseObject? _lastResponse;
-    private Mantle.InferenceOptions _inference = new();
+    private Mantle.ResponseRequest _defaultRequest = new();
     private Mantle.ConversationCompactionOptions _compaction = new(2048, ReservedForGeneration: 256);
     private Mantle.IConversationCompactor? _conversationCompactor;
     private Mantle.IToolExecutionEngine? _toolExecutionEngine;
@@ -223,9 +223,9 @@ public sealed class Agent : IAsyncDisposable, IDisposable
     /// <summary>
     /// Replaces the inference settings used by the session.
     /// </summary>
-    public Agent WithInference(Mantle.InferenceOptions options)
+    public Agent WithInference(Mantle.ResponseRequest options)
     {
-        _inference = options;
+        _defaultRequest = options;
         InvalidateSession();
         return this;
     }
@@ -338,21 +338,21 @@ public sealed class Agent : IAsyncDisposable, IDisposable
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(input);
 
-        return new Mantle.ResponseRequest(
-            Model: ResolveModelId(),
-            Input:
+        return _defaultRequest with
+        {
+            Model = ResolveModelId(),
+            Input =
             [
                 new Mantle.ResponseMessageItem(
                     Id: Mantle.SessionIds.Create("item"),
                     Role: "user",
                     Content: [new Mantle.ResponseTextContent("input_text", input)])
             ],
-            Instructions: BuildInstructions(),
-            Tools: CreateResponseToolDefinitions(),
-            PreviousResponseId: _previousResponseId,
-            Temperature: _inference.Temperature,
-            MaxOutputTokens: _inference.MaxOutputTokens,
-            Stream: false);
+            Instructions = BuildInstructions(),
+            Tools = CreateResponseToolDefinitions(),
+            PreviousResponseId = _previousResponseId,
+            Stream = false
+        };
     }
 
     /// <summary>
@@ -496,7 +496,7 @@ public sealed class Agent : IAsyncDisposable, IDisposable
             ModelPath = _modelPath!,
             ToolRegistry = _tools,
             Compaction = _compaction,
-            Inference = _inference with { Tools = _tools.ToTemplateTools() },
+            DefaultRequest = _defaultRequest with { Tools = CreateResponseToolDefinitions() },
             ConversationCompactor = _conversationCompactor,
             ToolExecutionEngine = _toolExecutionEngine,
             Logger = _logger

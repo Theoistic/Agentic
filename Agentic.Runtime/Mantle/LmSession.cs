@@ -36,6 +36,10 @@ public sealed class LmSession : IAsyncDisposable, IDisposable
         string ReasoningContent,
         bool HasReasoning);
 
+    private sealed record ResponseExecutionContext(
+        ResponseRequest Request,
+        IReadOnlyDictionary<string, RemoteToolBinding> RemoteTools);
+
     private readonly LmSessionOptions _options;
     private readonly List<ChatMessage> _history = [];
     private readonly List<int> _cachedTokens = [];
@@ -46,7 +50,7 @@ public sealed class LmSession : IAsyncDisposable, IDisposable
     private readonly string _template;
     private readonly string? _bosToken;
     private readonly string _imageToken;
-    private readonly InferenceOptions _inference;
+    private readonly ResponseRequest _defaultRequest;
     private readonly ConversationCompactionOptions _compaction;
     private readonly IConversationCompactor _conversationCompactor;
     private readonly IToolExecutionEngine _toolExecutionEngine;
@@ -83,11 +87,11 @@ public sealed class LmSession : IAsyncDisposable, IDisposable
         _template = template;
         _bosToken = bosToken;
         _imageToken = InferImageToken(template);
-        _inference = options.Inference ?? new InferenceOptions();
+        _defaultRequest = options.DefaultRequest ?? new ResponseRequest();
         _compaction = options.Compaction;
         _conversationCompactor = options.ConversationCompactor ?? new TokenWindowConversationCompactor();
-        _toolExecutionEngine = options.ToolExecutionEngine ?? new DefaultToolExecutionEngine();
-        _random = _inference.Seed is int seed ? new Random(seed) : Random.Shared;
+        _toolExecutionEngine = options.ToolExecutionEngine ?? new DefaultToolExecutionEngine([new McpRemoteToolExecutor()]);
+        _random = _defaultRequest.Seed is int seed ? new Random(seed) : Random.Shared;
         VisionDisabledReason = visionDisabledReason;
     }
 
@@ -105,8 +109,6 @@ public sealed class LmSession : IAsyncDisposable, IDisposable
         return Task.Run(() =>
         {
             Llama.Init(options.BackendDirectory, options.Logger);
-            var inference = options.Inference ?? new InferenceOptions();
-
             // Automatically resolve template and tokens from GGUF metadata
             var metadata = GgufReader.ReadMetadata(options.ModelPath);
             string template = GgufReader.GetString(metadata, "tokenizer.chat_template")
@@ -222,7 +224,9 @@ public sealed class LmSession : IAsyncDisposable, IDisposable
             ResetCore(clearResponses: false);
             _history.AddRange(responseHistory.Take(historyPrefixCount));
 
-            await foreach (var _ in GenerateCoreAsync(responseHistory[^1], ct).ConfigureAwait(false))
+            var executionContext = await CreateResponseExecutionContextAsync(request, ct).ConfigureAwait(false);
+
+            await foreach (var _ in GenerateCoreAsync(responseHistory[^1], executionContext, ct).ConfigureAwait(false))
             {
             }
 
@@ -259,7 +263,9 @@ public sealed class LmSession : IAsyncDisposable, IDisposable
             ResetCore(clearResponses: false);
             _history.AddRange(responseHistory.Take(historyPrefixCount));
 
-            await foreach (var chunk in GenerateCoreAsync(responseHistory[^1], ct).ConfigureAwait(false))
+            var executionContext = await CreateResponseExecutionContextAsync(request, ct).ConfigureAwait(false);
+
+            await foreach (var chunk in GenerateCoreAsync(responseHistory[^1], executionContext, ct).ConfigureAwait(false))
                 yield return chunk;
 
             FinalizeResponse(request.Model, request.PreviousResponseId, historyPrefixCount);
@@ -328,7 +334,7 @@ public sealed class LmSession : IAsyncDisposable, IDisposable
 
         try
         {
-            await foreach (var chunk in GenerateCoreAsync(message, ct).ConfigureAwait(false))
+            await foreach (var chunk in GenerateCoreAsync(message, new ResponseExecutionContext(_defaultRequest, new Dictionary<string, RemoteToolBinding>(StringComparer.Ordinal)), ct).ConfigureAwait(false))
             {
                 yield return chunk;
             }
@@ -341,9 +347,11 @@ public sealed class LmSession : IAsyncDisposable, IDisposable
 
     private async IAsyncEnumerable<ChatResponseChunk> GenerateCoreAsync(
         ChatMessage message,
+        ResponseExecutionContext executionContext,
         [EnumeratorCancellation] CancellationToken ct = default)
     {
         _history.Add(message);
+        var request = executionContext.Request;
 
         for (int round = 0; round < _options.MaxToolRounds; round++)
         {
@@ -351,38 +359,42 @@ public sealed class LmSession : IAsyncDisposable, IDisposable
 
             var fitted = CompactHistory(_history);
             var promptMessages = ApplyImageRetentionPolicy(fitted, _options.ImageRetentionPolicy);
-            string prompt = RenderPrompt(promptMessages);
+            string prompt = RenderPrompt(promptMessages, request);
             int[] promptTokens = Llama.Tokenize(_model, prompt);
 
             DebugViewCreated?.Invoke(this, new SessionDebugView(
                 History: [.. _history],
                 PromptMessages: [.. promptMessages],
                 RenderedPrompt: prompt,
-                Tools: _inference.Tools,
+                Tools: request.Tools?.Select(BuildPromptTool).Cast<object?>().ToList(),
                 PromptTokens: promptTokens.Length));
 
             await EnsurePromptEncodedAsync(prompt, promptTokens, promptMessages, ct);
 
             var output = new StringBuilder();
             List<ToolCall>? toolCalls = null;
+            var tokenCounts = new Dictionary<int, int>();
             int completionTokens = 0;
             int emittedContentLength = 0;
             int emittedReasoningLength = 0;
+            int maxOutputTokens = request.MaxOutputTokens.GetValueOrDefault() > 0 ? request.MaxOutputTokens.GetValueOrDefault() : _options.ContextTokens;
 
-            for (int i = 0; i < _options.ContextTokens; i++)
+            for (int i = 0; i < maxOutputTokens; i++)
             {
                 ct.ThrowIfCancellationRequested();
 
-                int token = Llama.SampleGreedy(_context, _model);
+                int token = Llama.Sample(_context, _model, request, tokenCounts, _random);
 
                 if (Llama.IsEndOfGeneration(_model, token))
                     break;
+
+                tokenCounts[token] = tokenCounts.TryGetValue(token, out int count) ? count + 1 : 1;
 
                 string piece = Llama.TokenToString(_model, token);
                 output.Append(piece);
                 completionTokens++;
 
-                var parsedOutput = ParseAssistantOutput(output.ToString(), _inference.EnableThinking);
+                var parsedOutput = ParseAssistantOutput(output.ToString(), request.EnableThinking ?? true);
                 string visibleContent = GetStreamingVisibleContent(parsedOutput.Content);
                 string? contentDelta = GetDelta(visibleContent, ref emittedContentLength);
                 string? reasoningDelta = GetDelta(parsedOutput.ReasoningContent, ref emittedReasoningLength);
@@ -409,7 +421,7 @@ public sealed class LmSession : IAsyncDisposable, IDisposable
             {
                 yield return new ChatResponseChunk(ToolCalls: toolCalls);
 
-                var assistantMessage = CreateAssistantMessage(outputText, _inference.EnableThinking, toolCalls, usage);
+                var assistantMessage = CreateAssistantMessage(outputText, request.EnableThinking ?? true, toolCalls, usage);
 
                 _history.Clear();
                 _history.AddRange(fitted);
@@ -418,7 +430,7 @@ public sealed class LmSession : IAsyncDisposable, IDisposable
 
                 foreach (var call in toolCalls!)
                 {
-                    string result = await ExecuteToolAsync(call, ct);
+                    string result = await ExecuteToolAsync(call, executionContext.RemoteTools, ct);
                     _history.Add(new ChatMessage("tool", result, ToolCallId: call.CallId));
                 }
                 continue;
@@ -426,10 +438,70 @@ public sealed class LmSession : IAsyncDisposable, IDisposable
 
             _history.Clear();
             _history.AddRange(fitted);
-            _history.Add(CreateAssistantMessage(outputText, _inference.EnableThinking, usage: usage));
+            _history.Add(CreateAssistantMessage(outputText, request.EnableThinking ?? true, usage: usage));
             yield return new ChatResponseChunk(Usage: usage);
             yield break;
         }
+    }
+
+    private async Task<ResponseExecutionContext> CreateResponseExecutionContextAsync(ResponseRequest request, CancellationToken ct)
+    {
+        var remoteTools = new Dictionary<string, RemoteToolBinding>(StringComparer.Ordinal);
+        List<ResponseToolDefinition> promptTools = request.Tools is { Count: > 0 }
+            ? []
+            : [.. _defaultRequest.Tools ?? []];
+
+        if (request.Tools is { Count: > 0 })
+        {
+            foreach (var tool in request.Tools)
+            {
+                if (string.Equals(tool.Type, "mcp", StringComparison.OrdinalIgnoreCase))
+                {
+                    foreach (var remoteTool in await McpHttpClient.ListToolsAsync(tool, ct).ConfigureAwait(false))
+                    {
+                        promptTools.Add(new ResponseToolDefinition(
+                            Type: "function",
+                            Name: remoteTool.Name,
+                            Parameters: remoteTool.InputSchema,
+                            Description: remoteTool.Description));
+                        remoteTools[remoteTool.Name] = remoteTool.Binding;
+                    }
+
+                    continue;
+                }
+
+                promptTools.Add(new ResponseToolDefinition(
+                    Type: "function",
+                    Name: tool.Name,
+                    Parameters: tool.Parameters ?? new { type = "object" },
+                    Description: tool.Description));
+            }
+        }
+
+        return new ResponseExecutionContext(MergeRequestDefaults(request, promptTools), remoteTools);
+    }
+
+    private ResponseRequest MergeRequestDefaults(ResponseRequest request, IReadOnlyList<ResponseToolDefinition> promptTools)
+    {
+        bool enableThinking = request.EnableThinking
+            ?? (request.ReasoningEffort is { Length: > 0 } reasoningEffort
+                ? !string.Equals(reasoningEffort, "none", StringComparison.OrdinalIgnoreCase)
+                : _defaultRequest.EnableThinking ?? true);
+
+        return request with
+        {
+            Temperature = request.Temperature ?? _defaultRequest.Temperature,
+            TopP = request.TopP ?? _defaultRequest.TopP,
+            TopK = request.TopK ?? _defaultRequest.TopK,
+            PresencePenalty = request.PresencePenalty ?? _defaultRequest.PresencePenalty,
+            FrequencyPenalty = request.FrequencyPenalty ?? _defaultRequest.FrequencyPenalty,
+            RepetitionPenalty = request.RepetitionPenalty ?? _defaultRequest.RepetitionPenalty,
+            MaxOutputTokens = request.MaxOutputTokens ?? _defaultRequest.MaxOutputTokens,
+            EnableThinking = enableThinking,
+            Tools = promptTools.Count > 0 ? [.. promptTools] : null,
+            AddVisionId = request.AddVisionId || _defaultRequest.AddVisionId,
+            Seed = request.Seed ?? _defaultRequest.Seed
+        };
     }
 
     private static ChatMessage CreateAssistantMessage(string rawText, bool enableThinking, List<ToolCall>? toolCalls = null, InferenceUsage? usage = null)
@@ -799,12 +871,27 @@ public sealed class LmSession : IAsyncDisposable, IDisposable
         return trimLength == 0 ? text : text[..^trimLength];
     }
 
-    private async Task<string> ExecuteToolAsync(ToolCall call, CancellationToken ct)
+    private async Task<string> ExecuteToolAsync(
+        ToolCall call,
+        IReadOnlyDictionary<string, RemoteToolBinding> remoteTools,
+        CancellationToken ct)
     {
+        if (remoteTools.TryGetValue(call.Name, out var remoteTool))
+            return await McpHttpClient.CallToolAsync(remoteTool, call.Arguments, ct).ConfigureAwait(false);
+
         if (!_options.ToolRegistry.TryGet(call.Name, out var tool))
             return $"Error: tool '{call.Name}' is not registered.";
 
         return await _toolExecutionEngine.ExecuteAsync(new ToolExecutionRequest(call, tool, _options.ToolRegistry), ct);
+    }
+
+    private static Dictionary<int, int> CreateTokenCounts(IEnumerable<int> tokens)
+    {
+        var counts = new Dictionary<int, int>();
+        foreach (int token in tokens)
+            counts[token] = counts.TryGetValue(token, out int count) ? count + 1 : 1;
+
+        return counts;
     }
 
     private static List<string> ExtractImageBase64s(IReadOnlyList<ChatMessage> messages)
@@ -902,7 +989,7 @@ public sealed class LmSession : IAsyncDisposable, IDisposable
         => _conversationCompactor.Compact(messages, new ConversationCompactionContext(_compaction, CountTokens, HasRenderableUserQuery));
 
     private int CountTokens(IReadOnlyList<ChatMessage> messages)
-        => Llama.Tokenize(_model, RenderPrompt(messages)).Length;
+        => Llama.Tokenize(_model, RenderPrompt(messages, _defaultRequest)).Length;
 
     private static bool HasRenderableUserQuery(IReadOnlyList<ChatMessage> messages)
     {
@@ -918,21 +1005,28 @@ public sealed class LmSession : IAsyncDisposable, IDisposable
         return false;
     }
 
-    private string RenderPrompt(IReadOnlyList<ChatMessage> messages)
+    private string RenderPrompt(IReadOnlyList<ChatMessage> messages, ResponseRequest request)
     {
         ValidateMessages(messages);
         var ctx = new Dictionary<string, object?>(StringComparer.Ordinal)
         {
             ["messages"] = messages.Select(BuildTemplateMessage).Cast<object?>().ToList(),
             ["add_generation_prompt"] = true,
-            ["enable_thinking"] = _inference.EnableThinking,
-            ["add_vision_id"] = _inference.AddVisionId,
-            ["tools"] = _inference.Tools
+            ["enable_thinking"] = request.EnableThinking ?? true,
+            ["add_vision_id"] = request.AddVisionId,
+            ["tools"] = request.Tools?.Select(BuildPromptTool).Cast<object?>().ToList()
         };
         if (!string.IsNullOrEmpty(_bosToken)) ctx["bos_token"] = _bosToken;
 
         return MiniJinjaChatTemplate.Render(_template, ctx);
     }
+
+    private static object BuildPromptTool(ResponseToolDefinition tool) => new
+    {
+        name = tool.Name,
+        description = tool.Description,
+        parameters = tool.Parameters ?? new { type = "object" }
+    };
 
     private static void ValidateMessages(IReadOnlyList<ChatMessage> messages)
     {

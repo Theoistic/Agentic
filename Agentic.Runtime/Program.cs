@@ -32,7 +32,7 @@ await using var agent = await new Agent()
         MicroBatchTokens = 1024,
         MaxToolRounds = 128
     })
-    .WithInference(new Mantle.InferenceOptions
+    .WithInference(new Mantle.ResponseRequest
     {
         MaxOutputTokens = 4096,
     })

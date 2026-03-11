@@ -189,15 +189,15 @@ public sealed class NativeBackend : ILLMBackend, IAsyncDisposable, IDisposable
     {
         ValidateUnsupportedFeatures(input, inference, tools, reasoning);
 
-        return new Mantle.ResponseRequest(
-            Model: ResolveModel(model),
-            Input: ConvertInput(input),
-            Instructions: instructions,
-            Tools: CreateToolDefinitions(),
-            PreviousResponseId: previousResponseId,
-            Temperature: null,
-            MaxOutputTokens: null,
-            Stream: stream);
+        return new Mantle.ResponseRequest
+        {
+            Model = ResolveModel(model),
+            Input = ConvertInput(input),
+            Instructions = instructions,
+            Tools = CreateToolDefinitions(),
+            PreviousResponseId = previousResponseId,
+            Stream = stream
+        };
     }
 
     private static void ValidateUnsupportedFeatures(

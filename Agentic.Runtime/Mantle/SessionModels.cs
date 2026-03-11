@@ -127,22 +127,119 @@ public sealed record ResponseToolDefinition(
     string Type,
     string Name,
     object? Parameters = null,
-    string? Description = null
+    string? Description = null,
+    string? ServerLabel = null,
+    string? ServerUrl = null,
+    IReadOnlyList<string>? AllowedTools = null,
+    IReadOnlyDictionary<string, string>? Headers = null
 );
 
 /// <summary>
 /// Request payload for a response-style API operation.
+/// The same type is also used as the source of per-session default generation settings.
 /// </summary>
-public sealed record ResponseRequest(
-    string Model,
-    IReadOnlyList<ResponseItem> Input,
-    string? Instructions = null,
-    IReadOnlyList<ResponseToolDefinition>? Tools = null,
-    string? PreviousResponseId = null,
-    float? Temperature = null,
-    int? MaxOutputTokens = null,
-    bool Stream = false
-);
+public sealed record ResponseRequest
+{
+    /// <summary>
+    /// Logical model identifier associated with the request.
+    /// For native sessions this is informational and is echoed back in response objects.
+    /// </summary>
+    public string Model { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Ordered response-style input items to replay for the current turn.
+    /// Defaults to an empty list so default request templates can be created without prompt content.
+    /// </summary>
+    public IReadOnlyList<ResponseItem> Input { get; init; } = [];
+
+    /// <summary>
+    /// Optional system or instruction text inserted ahead of the user-visible conversation.
+    /// </summary>
+    public string? Instructions { get; init; }
+
+    /// <summary>
+    /// Optional tool definitions exposed to the model for this request.
+    /// When omitted, the session-level default tool projection is used.
+    /// </summary>
+    public IReadOnlyList<ResponseToolDefinition>? Tools { get; init; }
+
+    /// <summary>
+    /// Optional ID of a previously emitted response whose history should be continued.
+    /// </summary>
+    public string? PreviousResponseId { get; init; }
+
+    /// <summary>
+    /// Sampling temperature.
+    /// The default value of <c>0</c> keeps native generation deterministic unless sampling is explicitly requested.
+    /// </summary>
+    public float? Temperature { get; init; } = 0.0f;
+
+    /// <summary>
+    /// Nucleus sampling threshold.
+    /// The default value of <c>1</c> disables top-p truncation until explicitly configured.
+    /// </summary>
+    public float? TopP { get; init; } = 1.0f;
+
+    /// <summary>
+    /// Top-k candidate cap applied after sorting logits.
+    /// The default value of <c>0</c> disables top-k truncation.
+    /// </summary>
+    public int? TopK { get; init; } = 0;
+
+    /// <summary>
+    /// Presence penalty applied to tokens that have already appeared in generated output.
+    /// The default value of <c>0</c> disables the penalty.
+    /// </summary>
+    public float? PresencePenalty { get; init; } = 0.0f;
+
+    /// <summary>
+    /// Frequency penalty applied proportionally to how often a token has already appeared in generated output.
+    /// The default value of <c>0</c> disables the penalty.
+    /// </summary>
+    public float? FrequencyPenalty { get; init; } = 0.0f;
+
+    /// <summary>
+    /// Repetition penalty requested by response-style callers.
+    /// The native runtime currently stores this value for compatibility but does not apply a dedicated repetition multiplier.
+    /// </summary>
+    public float? RepetitionPenalty { get; init; } = 1.0f;
+
+    /// <summary>
+    /// Enables or disables reasoning block parsing for this request.
+    /// The default value of <c>true</c> keeps the current thinking-enabled behavior.
+    /// </summary>
+    public bool? EnableThinking { get; init; } = true;
+
+    /// <summary>
+    /// Optional reasoning-effort hint such as <c>low</c>, <c>medium</c>, <c>high</c>, or <c>none</c>.
+    /// A value of <c>none</c> maps to <see cref="EnableThinking"/> = <c>false</c> when no explicit thinking toggle is provided.
+    /// </summary>
+    public string? ReasoningEffort { get; init; }
+
+    /// <summary>
+    /// Maximum number of assistant tokens to emit for the turn.
+    /// The default value of <c>512</c> matches the runtime's historic single-turn cap.
+    /// </summary>
+    public int? MaxOutputTokens { get; init; } = 512;
+
+    /// <summary>
+    /// Indicates whether the caller expects streamed chunks.
+    /// The runtime stores this flag for API parity; execution mode is selected by the method being used.
+    /// </summary>
+    public bool Stream { get; init; } = false;
+
+    /// <summary>
+    /// Optional deterministic random seed used by the native sampler.
+    /// When omitted, the runtime uses a shared non-deterministic source.
+    /// </summary>
+    public int? Seed { get; init; }
+
+    /// <summary>
+    /// Requests that the chat template include explicit vision identifiers when supported.
+    /// The default value of <c>false</c> preserves the standard text-only prompt format.
+    /// </summary>
+    public bool AddVisionId { get; init; } = false;
+}
 
 /// <summary>
 /// Base type for response-style input and output items.
@@ -271,9 +368,9 @@ public sealed record LmSessionOptions
     public required ConversationCompactionOptions Compaction { get; init; }
 
     /// <summary>
-    /// Per-inference sampling and generation behavior.
+    /// Default response-style settings applied to every native turn.
     /// </summary>
-    public InferenceOptions? Inference { get; init; }
+    public ResponseRequest? DefaultRequest { get; init; }
 
     /// <summary>
     /// Optional pluggable conversation compactor implementation.
@@ -401,74 +498,6 @@ public sealed record LmSessionOptions
     /// Optional KV cache quantization type for value tensors.
     /// </summary>
     public KvCacheQuantization? KvCacheTypeV { get; init; }
-}
-
-/// <summary>
-/// Sampling and generation settings applied to an individual inference run.
-/// </summary>
-public sealed record InferenceOptions
-{
-    /// <summary>
-    /// Maximum number of tokens the model is allowed to emit for a single assistant turn.
-    /// Larger values allow longer answers, but also increase latency and the chance of wandering output.
-    /// </summary>
-    public int MaxOutputTokens { get; init; } = 512;
-
-    /// <summary>
-    /// Primary randomness control for token sampling.
-    /// Lower values make output more deterministic; higher values increase creativity and risk.
-    /// A value less than or equal to zero falls back to greedy selection in the runtime.
-    /// </summary>
-    public float Temperature { get; init; } = 1.0f;
-
-    /// <summary>
-    /// Nucleus sampling threshold.
-    /// The sampler keeps only the smallest probability mass whose cumulative total reaches this value.
-    /// Lower values narrow the candidate set; higher values allow more diverse continuations.
-    /// </summary>
-    public float TopP { get; init; } = 0.95f;
-
-    /// <summary>
-    /// Hard cap on how many highest-ranked next-token candidates remain after sorting logits.
-    /// Useful for constraining sampling even when <see cref="TopP"/> is permissive.
-    /// </summary>
-    public int TopK { get; init; } = 20;
-
-    /// <summary>
-    /// Penalty applied once a token has appeared at least once in the generated text.
-    /// This encourages the model to introduce new concepts instead of repeating existing ones.
-    /// </summary>
-    public float PresencePenalty { get; init; } = 1.5f;
-
-    /// <summary>
-    /// Penalty applied proportionally to how often a token has already appeared.
-    /// This is stronger than presence-only control and helps suppress loops and repetitive phrasing.
-    /// </summary>
-    public float FrequencyPenalty { get; init; } = 1.0f;
-
-    /// <summary>
-    /// Optional deterministic seed for sampling.
-    /// When set, repeated runs with the same prompt and settings become more reproducible.
-    /// </summary>
-    public int? Seed { get; init; }
-
-    /// <summary>
-    /// Enables parsing and streaming of model reasoning blocks such as <c>&lt;think&gt;</c> content.
-    /// Disable this when you want only visible answer text and no reasoning surface area.
-    /// </summary>
-    public bool EnableThinking { get; init; } = true;
-
-    /// <summary>
-    /// Requests that the chat template include explicit vision identifiers when supported.
-    /// This is template/model specific and is mainly useful for multimodal prompt formats.
-    /// </summary>
-    public bool AddVisionId { get; init; } = false;
-
-    /// <summary>
-    /// Tool schema objects injected into the template context.
-    /// These describe callable functions the model may invoke during generation.
-    /// </summary>
-    public IReadOnlyList<object?>? Tools { get; init; }
 }
 
 /// <summary>

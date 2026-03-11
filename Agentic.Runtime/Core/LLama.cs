@@ -692,11 +692,17 @@ public static class Llama
     public static unsafe int Sample(
         Context ctx,
         Model model,
-        InferenceOptions options,
+        ResponseRequest options,
         IReadOnlyDictionary<int, int>? tokenCounts,
         Random random)
     {
-        if (options.Temperature <= 0)
+        float temperature = options.Temperature.GetValueOrDefault();
+        float presencePenalty = options.PresencePenalty.GetValueOrDefault();
+        float frequencyPenalty = options.FrequencyPenalty.GetValueOrDefault();
+        int topK = options.TopK.GetValueOrDefault();
+        float topP = options.TopP.GetValueOrDefault(1.0f);
+
+        if (temperature <= 0)
             return SampleGreedy(ctx, model);
 
         Vocab vocab = GetVocab(model);
@@ -716,19 +722,19 @@ public static class Llama
             if (tokenCounts is not null && tokenCounts.TryGetValue(token, out int count))
             {
                 if (count > 0)
-                    adjusted -= options.PresencePenalty;
+                    adjusted -= presencePenalty;
 
-                adjusted -= options.FrequencyPenalty * count;
+                adjusted -= frequencyPenalty * count;
             }
 
-            adjusted /= Math.Max(options.Temperature, 1e-6f);
+            adjusted /= Math.Max(temperature, 1e-6f);
             candidates.Add((token, adjusted));
         }
 
         candidates.Sort((a, b) => b.Logit.CompareTo(a.Logit));
 
-        if (options.TopK > 0 && options.TopK < candidates.Count)
-            candidates.RemoveRange(options.TopK, candidates.Count - options.TopK);
+        if (topK > 0 && topK < candidates.Count)
+            candidates.RemoveRange(topK, candidates.Count - topK);
 
         double maxLogit = candidates[0].Logit;
         double sum = 0;
@@ -743,7 +749,7 @@ public static class Llama
         for (int i = 0; i < weighted.Count; i++)
             weighted[i] = (weighted[i].Token, weighted[i].Probability / sum);
 
-        if (options.TopP > 0 && options.TopP < 1)
+        if (topP > 0 && topP < 1)
         {
             double cumulative = 0;
             int keep = 0;
@@ -751,7 +757,7 @@ public static class Llama
             for (; keep < weighted.Count; keep++)
             {
                 cumulative += weighted[keep].Probability;
-                if (cumulative >= options.TopP)
+                if (cumulative >= topP)
                 {
                     keep++;
                     break;
