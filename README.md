@@ -1,6 +1,6 @@
-# Agentic
+﻿# Agentic
 
-A lightweight .NET library for building LLM-powered agents with streaming chat, MCP tool hosting, context compaction, and vector storage — all via a clean, attribute-driven API.
+A lightweight .NET library for building LLM-powered agents with streaming chat, MCP tool hosting, context compaction, and vector storage â€” targeting both remote OpenAI-compatible APIs and local llama.cpp runtimes through a unified `ILLMBackend` abstraction.
 
 [![NuGet](https://img.shields.io/nuget/v/Theoistic.Agentic.svg)](https://www.nuget.org/packages/Theoistic.Agentic)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
@@ -9,44 +9,259 @@ A lightweight .NET library for building LLM-powered agents with streaming chat, 
 
 ## Features
 
-- **LM client** — OpenAI-compatible REST client (`/v1/responses`) with streaming, embeddings, vision and health-check
-- **Agent** — multi-turn streaming agent with automatic MCP tool orchestration
-- **Image input** — send images alongside text in any agent turn as a URL, local file, or base64 data URL; models receive a proper `input_image` content item
-- **Workflows** — ordered multi-step execution with per-step async guardrails and automatic retry
-- **Tool system** — define tools with `[Tool]` / `[ToolParam]` attributes; zero boilerplate
-- **Tool context** — HTTP headers from MCP requests are automatically forwarded to tool methods via `ToolContext`
-- **MCP server** — expose any `IAgentToolSet` over HTTP as a Model Context Protocol server in one line
-- **Context compaction** — automatically summarise older conversation history into a structured checkpoint before the context window fills up
-- **Vector storage** — `IStore` / `ICollection<T>` with SQLite (default) or PostgreSQL + pgvector backends
+- **`ILLMBackend`** â€” unified abstraction over any inference source; swap backends without touching agent code
+- **`OpenAIBackend`** â€” OpenAI-compatible REST client (`/v1/responses`) with streaming, embeddings, vision and named model aliases
+- **`NativeBackend`** â€” local llama.cpp inference via `Agentic.Runtime`; auto-downloads and installs the right binaries from GitHub on first run
+- **`LlamaRuntimeInstaller`** â€” on-demand runtime installer supporting CPU, CUDA and Vulkan backends on Windows and Linux, with optional release pinning
+- **Agent** â€” multi-turn streaming agent with automatic MCP tool orchestration
+- **Image input** â€” send images alongside text in any agent turn as a URL, local file, or base64 data URL
+- **Workflows** â€” ordered multi-step execution with per-step async guardrails and automatic retry
+- **Tool system** â€” define tools with `[Tool]` / `[ToolParam]` attributes; zero boilerplate
+- **Tool context** â€” HTTP headers from MCP requests forwarded to tool methods via `ToolContext`
+- **MCP server** â€” expose any `IAgentToolSet` over HTTP as a Model Context Protocol server in one line
+- **Context compaction** â€” automatically summarise older conversation history into a structured checkpoint before the context window fills up
+- **Vector storage** â€” `IStore` / `ICollection<T>` with SQLite (default) or PostgreSQL + pgvector backends
 
 ---
 
 ## Installation
 
 ```
-dotnet add package Agentic
+dotnet add package Theoistic.Agentic
 ```
 
-> **Requirements:** .NET 10 · ASP.NET Core (included via `Microsoft.AspNetCore.App` framework reference)
+> **Requirements:** .NET 10 Â· ASP.NET Core (included via `Microsoft.AspNetCore.App` framework reference)
 
 ---
 
 ## Quick Start
 
-### 1 — Create an LM client
+### Remote API (OpenAI-compatible server)
 
 ```csharp
 using Agentic;
 
-var lm = new LM(new LMConfig
+// Connect to LM Studio, OpenRouter, or any OpenAI-compatible endpoint
+var lm = new OpenAIBackend(new LMConfig
 {
-    Endpoint       = "http://localhost:1234",   // LM Studio or any OpenAI-compatible server
-    ModelName      = "your-model-name",
-    EmbeddingModel = "your-embedding-model",    // optional
+    Endpoint  = "http://localhost:1234",
+    ModelName = "your-model-name",
+});
+
+var agent = new Agent(lm, new AgentOptions
+{
+    SystemPrompt = "You are a helpful assistant.",
+    OnEvent      = e => { if (e.Kind == AgentEventKind.TextDelta) Console.Write(e.Text); },
+});
+
+await agent.ChatStreamAsync("Hello!");
+```
+
+### Local (llama.cpp â€” auto-installs runtime)
+
+```csharp
+using Agentic;
+using Agentic.Runtime.Core;
+
+var sessionOptions = new Mantle.LmSessionOptions
+{
+    ModelPath = @"/path/to/model.gguf",
+    // BackendDirectory is resolved automatically by NativeBackend
+};
+
+await using var lm = new NativeBackend(
+    sessionOptions,
+    backend:         LlamaBackend.Cuda,
+    cudaVersion:     "12.4",   // null = pick highest available
+    installProgress: new Progress<(string msg, double pct)>(p => Console.Write($"\r[{p.pct:F0}%] {p.msg}")));
+
+var agent = new Agent(lm, new AgentOptions
+{
+    SystemPrompt = "You are a helpful assistant.",
+    OnEvent      = e => { if (e.Kind == AgentEventKind.TextDelta) Console.Write(e.Text); },
+});
+
+await agent.ChatStreamAsync("Hello!");
+```
+
+On first run the correct llama.cpp release is downloaded and extracted to `%LOCALAPPDATA%\Agentic\llama-runtime\`. Every subsequent run skips the download entirely.
+
+---
+
+## `ILLMBackend`
+
+The core abstraction. Both `OpenAIBackend` and `NativeBackend` implement it, and `Agent` accepts any implementation â€” you can swap backends or inject mocks without changing any agent code.
+
+```csharp
+public interface ILLMBackend
+{
+    Task<ResponseResponse> RespondAsync(string input, ...);
+    Task<ResponseResponse> RespondAsync(IEnumerable<ResponseInput> input, ...);
+
+    IAsyncEnumerable<StreamEvent> RespondStreamingAsync(string input, ...);
+    IAsyncEnumerable<StreamEvent> RespondStreamingAsync(IEnumerable<ResponseInput> input, ...);
+
+    Task<float[]>        EmbedAsync(string input, CancellationToken ct = default);
+    Task<List<float[]>>  EmbedBatchAsync(IEnumerable<string> inputs, CancellationToken ct = default);
+
+    Task<bool>           PingAsync(CancellationToken ct = default);
+}
+```
+
+Implement this interface to add your own backend (Ollama, Anthropic proxy, test stub, etc.) and pass it straight to `Agent`.
+
+---
+
+## `OpenAIBackend`
+
+Connects to any OpenAI-compatible `/v1/responses` endpoint. Supports streaming, embeddings, named model aliases and per-request inference overrides.
+
+```csharp
+var lm = new OpenAIBackend(new LMConfig
+{
+    Endpoint       = "http://localhost:1234",   // LM Studio, OpenRouter, Azure OpenAI, â€¦
+    ModelName      = "qwen3.5-4b",             // default model
+    ApiKey         = "sk-...",                 // optional Bearer token
+    EmbeddingModel = "text-embedding-qwen3-0.6b",
+    Models =
+    {
+        ["advanced"] = "qwen3.5-9b",
+        ["ocr"]      = "lightonocr-2-1b",
+    },
+    Reasoning = ReasoningEffort.None,          // global default; override per-agent or per-call
+    Inference = new InferenceConfig { Temperature = 0.7 },
 });
 ```
 
-### 2 — Chat with the agent
+### `LMConfig` reference
+
+| Property | Default | Description |
+|----------|---------|-------------|
+| `Endpoint` | `"http://localhost:5454"` | Base URL of the OpenAI-compatible API server |
+| `ModelName` | `"liquid/lfm2.5-1.2b"` | Default model identifier sent in every request |
+| `ApiKey` | `""` | Bearer token sent in the `Authorization` header |
+| `EmbeddingModel` | `null` | Model used for `EmbedAsync` / `EmbedBatchAsync` |
+| `Reasoning` | `null` | Global reasoning effort default |
+| `Inference` | `null` | Global inference parameter defaults |
+| `Models` | `{}` | Named aliases resolved by `ResolveModel(key)` |
+
+---
+
+## `NativeBackend`
+
+Runs inference locally through `Agentic.Runtime` (llama.cpp). The session is initialized lazily on first use. When constructed with a `LlamaBackend`, the runtime is downloaded and installed automatically if not already present.
+
+### Constructor overloads
+
+**Explicit backend directory** â€” you already have the binaries:
+
+```csharp
+var sessionOptions = new Mantle.LmSessionOptions
+{
+    BackendDirectory = @"C:\llama-runtime\cuda-b8269",
+    ModelPath        = @"C:\models\qwen.gguf",
+    ContextTokens    = 8192,
+    MaxToolRounds    = 32,
+};
+
+await using var lm = new NativeBackend(sessionOptions);
+```
+
+**Auto-install** â€” downloads the runtime on first run:
+
+```csharp
+var sessionOptions = new Mantle.LmSessionOptions
+{
+    ModelPath     = @"C:\models\qwen.gguf",
+    ContextTokens = 8192,
+    MaxToolRounds = 32,
+    // BackendDirectory is omitted â€” resolved automatically
+};
+
+await using var lm = new NativeBackend(
+    sessionOptions,
+    backend:         LlamaBackend.Cuda,
+    cudaVersion:     "12.4",       // null = pick highest CUDA 12.x available
+    releaseTag:      "b8269",      // null = latest release
+    installProgress: new Progress<(string msg, double pct)>(
+        p => Console.Write($"\r[{p.pct:F0}%] {p.msg}")));
+```
+
+### `NativeBackend` properties
+
+| Member | Description |
+|--------|-------------|
+| `BackendDirectory` | Resolved path to the native binaries after the session is first initialized; `null` before first use |
+
+### `LmSessionOptions` reference
+
+| Property | Default | Description |
+|----------|---------|-------------|
+| `BackendDirectory` | `""` | Directory containing llama.cpp binaries. Omit when using auto-install |
+| `ModelPath` | *(required)* | Full path to the GGUF model file |
+| `ContextTokens` | `8192` | Total KV cache token capacity |
+| `ResetContextTokens` | `2048` | Reserved context for context-reset operations |
+| `BatchTokens` | `1024` | Prompt evaluation batch size |
+| `MicroBatchTokens` | `1024` | Internal llama.cpp micro-batch size |
+| `MaxToolRounds` | `10` | Maximum tool-call rounds per turn |
+| `Threads` | `null` | CPU thread count (`null` = llama.cpp default) |
+| `FlashAttention` | `false` | Enable flash attention when supported |
+| `OffloadKvCacheToGpu` | `true` | Offload KV cache to GPU |
+| `UseMmap` | `true` | Memory-map model file |
+
+---
+
+## `LlamaRuntimeInstaller`
+
+Downloads and extracts llama.cpp native binaries from [ggml-org/llama.cpp](https://github.com/ggml-org/llama.cpp) GitHub releases. Installed runtimes are cached under `DefaultInstallRoot` and reused on subsequent runs with no network call.
+
+```csharp
+using Agentic.Runtime.Core;
+
+// Ensure installed, return the binary directory
+string backendDir = await LlamaRuntimeInstaller.EnsureInstalledAsync(
+    backend:    LlamaBackend.Cuda,
+    cudaVersion: "12.4",      // null = pick the highest CUDA 12.x asset automatically
+    releaseTag:  "b8269",     // null = always use the latest published release
+    progress:    new Progress<(string msg, double pct)>(p => Console.Write($"\r[{p.pct:F0}%] {p.msg}")));
+
+// Check what is already installed (no download)
+string? existing = LlamaRuntimeInstaller.FindInstalled(LlamaBackend.Cuda, releaseTag: "b8269");
+```
+
+### `LlamaBackend` enum
+
+| Value | Description |
+|-------|-------------|
+| `Cpu` | CPU-only inference (AVX2 preferred, falls back to AVX / noavx) |
+| `Cuda` | NVIDIA CUDA GPU acceleration |
+| `Vulkan` | Vulkan GPU acceleration (AMD / Intel / NVIDIA) |
+
+### Install root
+
+| Platform | Default path |
+|----------|-------------|
+| Windows | `%LOCALAPPDATA%\Agentic\llama-runtime\` |
+| Linux / macOS | `~/.local/share/Agentic/llama-runtime/` |
+
+Each installed release occupies its own subdirectory named `{backend}-{tag}` (e.g. `cuda-b8269`), so multiple versions coexist safely.
+
+### Release pinning
+
+By default the installer always fetches the **latest** published release. To pin to a specific build, pass `releaseTag`:
+
+```csharp
+// Always use b8269, regardless of what is latest on GitHub
+await LlamaRuntimeInstaller.EnsureInstalledAsync(LlamaBackend.Cuda, releaseTag: "b8269");
+```
+
+If `b8269` is already installed the call returns immediately. Pass `forceReinstall: true` to re-download even when the directory exists.
+
+---
+
+## Agent
+
+`Agent` accepts any `ILLMBackend` and exposes four turn styles â€” single-shot or multi-turn, streaming or non-streaming â€” each with an optional images overload.
 
 ```csharp
 var agent = new Agent(lm, new AgentOptions
@@ -54,19 +269,82 @@ var agent = new Agent(lm, new AgentOptions
     SystemPrompt = "You are a helpful assistant.",
     OnEvent      = e =>
     {
-        if (e.Kind == AgentEventKind.TextDelta)
-            Console.Write(e.Text);
+        if (e.Kind == AgentEventKind.TextDelta) Console.Write(e.Text);
     },
 });
 
-// Single-turn (no history)
-var response = await agent.RunAsync("Hello!", mcpServerUrl: "http://localhost:5100/mcp");
-
-// Multi-turn streaming (maintains conversation history)
-await agent.ChatStreamAsync("What did I just say?", mcpServerUrl: "http://localhost:5100/mcp");
+agent.RegisterTools(new MyTools());
 ```
 
-### 3 — Define tools
+### Turn methods
+
+| Method | History | Streaming |
+|--------|---------|-----------|
+| `RunAsync` | No | No |
+| `RunStreamAsync` | No | Yes |
+| `ChatAsync` | Yes | No |
+| `ChatStreamAsync` | Yes | Yes |
+
+Every method has a `(text, images, ...)` overload for multimodal input. All return `Task<AgentResponse>`.
+
+```csharp
+// Single-shot
+var response = await agent.RunAsync("Summarise this document.", mcpServerUrl: "http://localhost:5100/mcp");
+
+// Multi-turn (maintains history via previousResponseId chaining)
+await agent.ChatStreamAsync("What did I just ask about?");
+
+// Multi-turn with an image
+await agent.ChatStreamAsync(
+    "What is in this diagram?",
+    images:       ["https://example.com/diagram.png"],
+    mcpServerUrl: "http://localhost:5100/mcp");
+
+// Reset conversation history
+agent.ResetConversation();
+```
+
+### `AgentResponse`
+
+| Property | Description |
+|----------|-------------|
+| `Text` | Final model text for this turn |
+| `ToolInvocations` | All tool calls executed during the turn, in order |
+| `Usage` | Token usage (`InputTokens`, `OutputTokens`, `TotalTokens`); may be `null` |
+
+### `AgentOptions`
+
+| Property | Default | Description |
+|----------|---------|-------------|
+| `SystemPrompt` | `null` | Instruction text prepended to every request |
+| `OnEvent` | `null` | Callback fired for every `AgentEvent` during a turn |
+| `Reasoning` | `null` | Agent-level reasoning effort (see [Reasoning Control](#reasoning-control)) |
+| `Inference` | `null` | Agent-level sampling parameters (see [Inference Config](#inference-config)) |
+| `Model` | `null` | Agent-level model default (see [Model Selection](#model-selection)) |
+| `Logger` | `null` | `ILogger` â€” events are written automatically; no `OnEvent` switch needed |
+
+### `AgentEvent` / `AgentEventKind`
+
+| Kind | When fired |
+|------|-----------|
+| `UserInput` | User message was received |
+| `SystemPrompt` | System prompt dispatched to the model |
+| `ToolDeclaration` | An MCP server was declared for this request |
+| `Reasoning` | Model emitted a thinking / reasoning chunk |
+| `TextDelta` | Streaming text delta arrived |
+| `ToolCall` | Model invoked a tool |
+| `ToolResult` | Tool returned its result |
+| `Answer` | Model produced its final answer |
+| `StepCompleted` | A workflow step completed |
+| `WorkflowCompleted` | All workflow steps completed |
+
+---
+
+## Tools
+
+### Defining tools
+
+Add `[Tool]` to any public method on an `IAgentToolSet` class. Parameters get `[ToolParam]` descriptions â€” these form the JSON Schema sent to the model.
 
 ```csharp
 using System.ComponentModel;
@@ -75,21 +353,48 @@ public class WeatherTools : IAgentToolSet
 {
     [Tool, Description("Get the current weather for a city.")]
     public Task<string> GetWeather(
-        [ToolParam("City name")] string city,
+        [ToolParam("City name")]  string city,
         [ToolParam("Unit: celsius or fahrenheit")] string unit = "celsius")
     {
-        return Task.FromResult($"The weather in {city} is 22 °{(unit == "fahrenheit" ? "F" : "C")} and sunny.");
+        return Task.FromResult($"The weather in {city} is 22 Â°{(unit == "fahrenheit" ? "F" : "C")}.");
     }
 }
 ```
 
-### 4 — Host an MCP server
+`[Tool]` accepts an optional explicit name: `[Tool("get_weather")]`. By default the method name is converted to `snake_case`.
+
+`CancellationToken` and `ToolContext` parameters are injected automatically and never appear in the model's tool schema.
+
+### Registering tools
+
+```csharp
+// On an agent
+agent.RegisterTools(new WeatherTools());
+
+// On a shared ToolRegistry
+toolRegistry.Register(new WeatherTools());
+toolRegistry.Register(new WeatherTools(), replaceExisting: true);
+```
+
+### `IAgentToolSet` variants
+
+| Interface | Description |
+|-----------|-------------|
+| `IAgentToolSet` | Standard tool set |
+| `IDisposableToolSet` | Tool set with async cleanup (`ValueTask DisposeAsync()`) |
+
+---
+
+## MCP Server
+
+Expose any `IAgentToolSet` over HTTP as a Model Context Protocol (MCP) server. Any MCP-compatible client (LM Studio, Claude Desktop, â€¦) can call the tools.
 
 ```csharp
 var builder = WebApplication.CreateBuilder(args);
+
 builder.Services.AddAgenticMcp(opt =>
 {
-    opt.ApiKey          = "my-secret-key";   // optional Bearer-token auth
+    opt.ApiKey          = "my-secret-key";         // optional Bearer-token auth
     opt.ToolCallTimeout = TimeSpan.FromSeconds(55);
 });
 
@@ -102,48 +407,109 @@ tools.Register(new WeatherTools());
 await app.RunAsync();
 ```
 
-The MCP server exposes all registered tools over SSE + JSON-RPC so any MCP-compatible client (LM Studio, Claude Desktop, …) can call them.
+### MCP server options
+
+| Property | Default | Description |
+|----------|---------|-------------|
+| `ApiKey` | `null` | Bearer token required on every request (`null` = open) |
+| `AllowedOrigins` | `null` | CORS origin allowlist for browser clients |
+| `ToolCallTimeout` | `55 s` | Cancels tool calls that take too long and returns a clean error |
+| `ServerName` | `"Agentic"` | Reported to MCP clients during `initialize` |
+| `ProtocolVersion` | `"2025-03-26"` | MCP protocol version advertised |
+
+---
+
+## Workflows
+
+A `Workflow` is an ordered sequence of steps the agent executes in turn. Each step has an instruction for the model and an optional **verification callback** that must return `true` before the agent advances.
+
+```csharp
+var workflow = new Workflow("Process Invoice")
+    .Step(
+        name:        "Extract header",
+        instruction: "Extract the invoice number, date, vendor name, and total.",
+        verify:      ctx => ctx.ToolInvocations.Any(t => t.Name == "save_invoice_header"))
+    .Step(
+        name:        "Extract line items",
+        instruction: "Extract every line item.",
+        verify:      ctx => ctx.ToolInvocations.Any(t => t.Name == "save_invoice_lines"))
+    .Step(
+        name:        "Confirm totals",
+        instruction: "Sum the line items and confirm they match the total.",
+        verify:      ctx => ctx.ResponseText.Contains("match", StringComparison.OrdinalIgnoreCase));
+
+var result = await agent.RunWorkflowAsync(
+    workflow,
+    input:        "Process the attached invoice.",
+    mcpServerUrl: "http://localhost:5100/mcp",
+    maxRounds:    10);
+
+if (result.Completed)
+    Console.WriteLine("All steps completed.");
+else
+{
+    var pending = result.Steps.Where(s => s.Status == WorkflowStepStatus.Pending);
+    Console.WriteLine($"Incomplete: {string.Join(", ", pending.Select(s => s.Name))}");
+}
+```
+
+### `WorkflowContext` (inside a verify callback)
+
+| Property | Description |
+|----------|-------------|
+| `ToolInvocations` | All tool calls made so far in this workflow run |
+| `ResponseText` | Accumulated model output across all rounds |
+
+### `WorkflowResult`
+
+| Property | Description |
+|----------|-------------|
+| `Completed` | `true` when every step reached `Completed` |
+| `Text` | Combined model response text from all rounds |
+| `Steps` | Final state of each step |
+| `ToolInvocations` | All tool calls made during the run, in order |
+
+### Guardrail patterns
+
+```csharp
+// Tool was called
+verify: ctx => ctx.ToolInvocations.Any(t => t.Name == "save_data")
+
+// Model confirmed something in its text output
+verify: ctx => ctx.ResponseText.Contains("confirmed", StringComparison.OrdinalIgnoreCase)
+
+// Async database check
+verify: async ctx =>
+{
+    await using var db = await dbFactory.CreateDbContextAsync();
+    return await db.Invoices.AnyAsync(i => i.Id == invoiceId);
+}
+```
 
 ---
 
 ## Context Compaction
 
-When the conversation approaches the model's context limit, Agentic can automatically compress older turns into a structured checkpoint and continue from there:
+When a conversation approaches the model's context limit, Agentic can compress older turns into a structured checkpoint and continue seamlessly.
+
+> Context compaction is currently used internally by `Agentic.Runtime` (native sessions). The `ConversationCompactionOptions` type is part of `Agentic.Runtime.Mantle` and is configured via `LmSessionOptions.Compaction`.
 
 ```csharp
-var agent = new Agent(lm, new AgentOptions
+var sessionOptions = new Mantle.LmSessionOptions
 {
-    Compaction = new CompactionOptions
-    {
-        MaxContextTokens    = 128_000,
-        CompactionThreshold = 0.85,      // compact at 85 % usage
-        DefaultLevel        = CompactionLevel.Standard,
-        HotTailTurns        = 4,         // keep the last 4 user turns verbatim
-        AutoCompact         = true,
-    },
-});
-
-// Manual compaction
-var checkpoint = await agent.CompactAsync(CompactionLevel.Detailed);
-
-// Reset conversation while keeping no history
-agent.ResetConversation();
+    ModelPath  = @"/path/to/model.gguf",
+    Compaction = new Mantle.ConversationCompactionOptions(
+        MaxInputTokens:        4096,
+        ReservedForGeneration: 256),
+};
 ```
-
-Compaction levels:
-
-| Level | What is kept |
-|-------|-------------|
-| `Light` | Goals + next actions only |
-| `Standard` | Goals, decisions, status, next steps |
-| `Detailed` | Full nuance — decisions, rationale, edge cases, key outputs |
 
 ---
 
 ## Vector Storage
 
 ```csharp
-// SQLite (default)
+// SQLite (default â€” no extra configuration required)
 services.AddStore();
 
 // PostgreSQL + pgvector
@@ -157,8 +523,8 @@ services.AddInMemoryStore();
 Work with typed collections:
 
 ```csharp
-var store      = services.BuildServiceProvider().GetRequiredService<IStore>();
-var articles   = store.Collection<Article>("articles");
+var store    = services.BuildServiceProvider().GetRequiredService<IStore>();
+var articles = store.Collection<Article>("articles");
 
 var id = await articles.InsertAsync(new Article { Title = "Hello" }, embedding: vector);
 await articles.UpsertAsync(id, new Article { Title = "Updated" });
@@ -170,382 +536,118 @@ foreach (var r in results)
 
 ---
 
-## MCP Server Options
-
-| Property | Default | Description |
-|----------|---------|-------------|
-| `ApiKey` | `null` | Bearer token required on every request (`null` = open) |
-| `AllowedOrigins` | `null` | CORS origin allowlist for browser clients |
-| `ToolCallTimeout` | `55 s` | Cancels tool calls that exceed this duration and returns a clean error |
-| `ServerName` | `"Agentic"` | Reported to MCP clients during `initialize` |
-| `ProtocolVersion` | `"2025-03-26"` | MCP protocol version advertised |
-
----
-
-## AgentOptions
-
-| Property | Default | Description |
-|----------|---------|-------------|
-| `SystemPrompt` | `null` | Instruction text prepended to every request |
-| `OnEvent` | `null` | Callback fired for every `AgentEvent` |
-| `Compaction` | `null` | Enable context compaction (see above) |
-| `Reasoning` | `null` | Per-agent reasoning effort (see [Reasoning Control](#reasoning-control)) |
-| `Inference` | `null` | Per-agent sampling parameters (see [Inference Config](#inference-config)) |
-| `Model` | `null` | Per-agent model default (see [Model Selection](#model-selection)) |
-
----
-
 ## Reasoning Control
 
-For models that support chain-of-thought reasoning (e.g. Qwen3), you can control the reasoning effort at three levels. Each level overrides the one above it.
+For models that support chain-of-thought reasoning (e.g. Qwen3), control thinking effort at three levels. Each level overrides the one above it.
 
 | Value | Behaviour |
 |-------|-----------|
-| `None` | Disables chain-of-thought thinking (`enable_thinking=false`) |
-| `Low` | Enables thinking with low effort |
-| `Medium` | Enables thinking with medium effort |
-| `High` | Enables thinking with high effort (slower, more thorough) |
-
-### 1 — Global default (LMConfig)
-
-Applies to every request made through this `LM` instance unless overridden.
+| `None` | Disable thinking (`enable_thinking=false`) |
+| `Low` | Enable thinking with low effort |
+| `Medium` | Enable thinking with medium effort |
+| `High` | Enable thinking with high effort |
 
 ```csharp
-var lm = new LM(new LMConfig
-{
-    Endpoint  = "http://localhost:1234",
-    ModelName = "Qwen/Qwen3-30B-A3B",
-    Reasoning = ReasoningEffort.None,   // thinking off by default
-});
+// 1 â€” Global default on the backend config
+var lm = new OpenAIBackend(new LMConfig { ..., Reasoning = ReasoningEffort.None });
+
+// 2 â€” Per-agent default
+var agent = new Agent(lm, new AgentOptions { Reasoning = ReasoningEffort.High });
+
+// 3 â€” Per-request override (highest precedence)
+await agent.ChatStreamAsync("Complex question...", reasoning: ReasoningEffort.High);
+await agent.ChatStreamAsync("Quick question...",   reasoning: ReasoningEffort.None);
 ```
 
-### 2 — Per-agent default (AgentOptions)
-
-Overrides the global `LMConfig.Reasoning` for this agent only.
-
-```csharp
-var agent = new Agent(lm, new AgentOptions
-{
-    SystemPrompt = "You are a helpful assistant.",
-    Reasoning    = ReasoningEffort.High,   // override: high reasoning for this agent
-});
-```
-
-### 3 — Per-request override
-
-Pass `reasoning:` to any `Run*` / `Chat*` call. This takes precedence over both the agent and global defaults.
-
-```csharp
-// Reasoning off for a quick question
-var response = await agent.ChatStreamAsync(
-    "Quick question — what is 2 + 2?",
-    mcpServerUrl: "http://localhost:5100/mcp",
-    reasoning: ReasoningEffort.None);
-
-// High effort for a complex analysis
-var response = await agent.ChatStreamAsync(
-    "Analyse the trade-offs of this architecture design.",
-    mcpServerUrl: "http://localhost:5100/mcp",
-    reasoning: ReasoningEffort.High);
-```
-
-> **Precedence:** per-request → per-agent (`AgentOptions.Reasoning`) → global (`LMConfig.Reasoning`) → not sent (model default).
+> **Precedence:** per-request â†’ `AgentOptions.Reasoning` â†’ `LMConfig.Reasoning` â†’ not sent (model default).
 
 ---
 
 ## Inference Config
 
-Sampling and penalty parameters are grouped in `InferenceConfig` and follow the same three-level override pattern. Only fields that are non-`null` are forwarded to the server; unset fields fall through to the next level.
+Sampling and penalty parameters are grouped in `InferenceConfig` and follow the same three-level precedence. Only non-`null` fields are forwarded to the server.
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `Temperature` | `double?` | Sampling temperature. Higher values produce more varied output |
+| `Temperature` | `double?` | Sampling temperature |
 | `TopP` | `double?` | Top-p (nucleus) sampling cutoff |
-| `TopK` | `int?` | Top-k — limits the candidate token pool |
-| `MinP` | `double?` | Minimum probability threshold for token selection |
-| `PresencePenalty` | `double?` | Penalises tokens that have already appeared in the output |
-| `RepetitionPenalty` | `double?` | Multiplier applied to logits of previously-seen tokens |
-
-### 1 — Global default (LMConfig)
+| `TopK` | `int?` | Top-k token pool limit |
+| `MinP` | `double?` | Minimum token probability threshold |
+| `PresencePenalty` | `double?` | Penalty for tokens already in the output |
+| `RepetitionPenalty` | `double?` | Multiplier on logits of previously-seen tokens |
 
 ```csharp
-var lm = new LM(new LMConfig
-{
-    Endpoint  = "http://localhost:1234",
-    ModelName = "your-model-name",
-    Inference = new InferenceConfig
-    {
-        Temperature       = 0.7,
-        TopP              = 0.8,
-        TopK              = 20,
-        MinP              = 0.0,
-        PresencePenalty   = 1.5,
-        RepetitionPenalty = 1.0,
-    },
-});
+// 1 â€” Global default
+var lm = new OpenAIBackend(new LMConfig { ..., Inference = new InferenceConfig { Temperature = 0.7 } });
+
+// 2 â€” Per-agent default
+var agent = new Agent(lm, new AgentOptions { Inference = new InferenceConfig { Temperature = 1.2 } });
+
+// 3 â€” Per-request override
+await agent.ChatStreamAsync("Write a poem.", inference: new InferenceConfig { Temperature = 1.5 });
 ```
 
-### 2 — Per-agent default (AgentOptions)
-
-```csharp
-var agent = new Agent(lm, new AgentOptions
-{
-    SystemPrompt = "You are a creative writer.",
-    Inference    = new InferenceConfig { Temperature = 1.2, RepetitionPenalty = 1.1 },
-});
-```
-
-### 3 — Per-request override
-
-Pass `inference:` to any `Run*` / `Chat*` call.
-
-```csharp
-var response = await agent.ChatStreamAsync(
-    "Write me a poem.",
-    mcpServerUrl: "http://localhost:5100/mcp",
-    inference: new InferenceConfig { Temperature = 1.5, TopP = 0.95 });
-```
-
-> **Precedence:** per-request → per-agent (`AgentOptions.Inference`) → global (`LMConfig.Inference`) → not sent (server default).
+> **Precedence:** per-request â†’ `AgentOptions.Inference` â†’ `LMConfig.Inference` â†’ not sent (server default).
 
 ---
 
 ## Model Selection
 
-Agentic supports multiple named model aliases in a single `LM` instance. You define them once in `LMConfig.Models` and then reference them by key at the agent or per-call level — the same three-level override pattern used by [Reasoning Control](#reasoning-control).
-
-### 1 — Define aliases in LMConfig
-
-`ModelName` is the default model used for every request. `Models` maps short keys to full model identifiers. Aliases that are not in the dictionary are treated as literal model IDs, so you can also pass a raw model name directly.
+Define short aliases in `LMConfig.Models` and reference them at the agent or per-call level.
 
 ```csharp
-var lm = new LM(new LMConfig
+var lm = new OpenAIBackend(new LMConfig
 {
-    Endpoint       = "http://localhost:1234",
-    ModelName      = "qwen3.5-4b",               // default for all requests
-    EmbeddingModel = "text-embedding-qwen3-0.6b",
+    Endpoint  = "http://localhost:1234",
+    ModelName = "qwen3.5-4b",                    // default
     Models =
     {
-        ["advanced"] = "qwen3.5-9b",             // heavy reasoning
-        ["ocr"]      = "lightonocr-2-1b",        // vision / OCR
+        ["advanced"] = "qwen3.5-9b",
+        ["ocr"]      = "lightonocr-2-1b",
     },
 });
 ```
 
-You can inspect what a key resolves to at any time:
-
 ```csharp
-string modelId = lm.ResolveModel("ocr");   // → "lightonocr-2-1b"
-string modelId = lm.ResolveModel(null);    // → "qwen3.5-4b"  (the default)
+// Per-agent default
+var ocrAgent = new Agent(lm, new AgentOptions { Model = "ocr" });
+
+// Per-request override
+await agent.ChatStreamAsync("Analyse this.", model: "advanced");
+
+// Raw model ID (not in the alias map)
+await agent.RunAsync("Summarise.", model: "some-other-model-id");
 ```
 
-### 2 — Per-agent default (AgentOptions)
-
-Set `AgentOptions.Model` to pin every call made by that agent to a specific alias or literal model ID, overriding `LMConfig.ModelName`.
-
-```csharp
-// This agent always uses the advanced model
-var heavyAgent = new Agent(lm, new AgentOptions
-{
-    SystemPrompt = "You are a research assistant.",
-    Model        = "advanced",
-});
-
-// This agent always uses the OCR model
-var ocrAgent = new Agent(lm, new AgentOptions
-{
-    SystemPrompt = "Extract text from the provided images.",
-    Model        = "ocr",
-});
-```
-
-### 3 — Per-request override
-
-Pass `model:` to any `Run*` / `Chat*` call to override the model for just that one turn. This takes precedence over both the agent and global defaults.
-
-```csharp
-// Use the OCR model for a single image turn, then continue with the default
-await agent.ChatStreamAsync(
-    "Extract all text from this receipt.",
-    images:       [dataUrl],
-    mcpServerUrl: "http://localhost:5100/mcp",
-    model:        "ocr");
-
-// Use the advanced model for a one-off complex question
-var response = await agent.ChatStreamAsync(
-    "Analyse the trade-offs of this architecture.",
-    mcpServerUrl: "http://localhost:5100/mcp",
-    model:        "advanced");
-
-// Pass a raw model ID if you haven't added it as an alias
-var response = await agent.RunAsync(
-    "Summarise this.",
-    mcpServerUrl: "http://localhost:5100/mcp",
-    model:        "some-other-model-id");
-```
-
-> **Precedence:** per-request `model:` → `AgentOptions.Model` → `LMConfig.ModelName`.
+> **Precedence:** per-request `model:` â†’ `AgentOptions.Model` â†’ `LMConfig.ModelName`.
 
 ---
 
 ## Image Input (Vision)
 
-Agentic sends images to the model as `input_image` content items in the `/v1/responses` request body — not as raw base64 text. Every image overload on `Agent` participates in the conversation chain (`previousResponseId`) just like a text turn.
-
-### Building image content parts
+All four agent turn methods have an `images` overload. Images participate in conversation history (`previousResponseId` chaining) normally.
 
 ```csharp
-// From a public or private URL (downloaded locally to avoid SSRF blocks)
-var img = InputImageContent.FromUrl("https://example.com/photo.jpg");
+// From a URL
+await agent.ChatStreamAsync("What is in this image?", images: ["https://example.com/photo.jpg"]);
 
-// From a local file — reads and base64-encodes automatically
-var img = InputImageContent.FromFile(@"C:\images\diagram.png");
-
-// From a base64 data URL you already have
-var img = InputImageContent.FromUrl("data:image/png;base64,iVBOR...");
-```
-
-MIME type is inferred from the file extension (`.jpg`, `.png`, `.gif`, `.webp`); everything else defaults to `image/jpeg`.
-
-### Building a multimodal `ResponseInput`
-
-```csharp
-// Single image + text in one user turn
-var turn = ResponseInput.User("What does this diagram show?", [imageDataUrl]);
+// From a local file (reads and base64-encodes automatically)
+var dataUrl = InputImageContent.FromFile("diagram.png").ImageUrl!;
+await agent.ChatStreamAsync("Describe this diagram.", images: [dataUrl]);
 
 // Multiple images
-var turn = ResponseInput.User("Compare these two layouts.", [urlA, urlB]);
+await agent.ChatStreamAsync("Compare these two layouts.", images: [urlA, urlB]);
 ```
 
-`ResponseInput.User(text, images)` wraps the text as an `input_text` part and each image string as an `input_image` part.
+`ResponseInput.User(text, images)` wraps text as `input_text` and each image string as `input_image`.
 
-### Attaching images to an agent turn
-
-All four `Agent` chat methods have an image overload. The image is part of the current conversation thread — `previousResponseId` chaining and context compaction work normally.
-
-```csharp
-// Multi-turn streaming (most common)
-await agent.ChatStreamAsync(
-    "What is wrong with this schematic?",
-    images:       ["https://host/circuit.png"],
-    mcpServerUrl: "http://localhost:5100/mcp");
-
-// Multi-turn non-streaming
-var response = await agent.ChatAsync(
-    "Summarise the chart.",
-    images:       [InputImageContent.FromFile("chart.png").ImageUrl!],
-    mcpServerUrl: "http://localhost:5100/mcp");
-
-// Single-shot (no history kept)
-var response = await agent.RunStreamAsync(
-    "OCR this receipt.",
-    images:       [dataUrl],
-    mcpServerUrl: "http://localhost:5100/mcp");
-```
-
-> **Private / internal URLs:** If your image is hosted on a private IP the LM server cannot reach (SSRF block), download the bytes yourself first and pass a `data:image/…;base64,…` data URL instead. `InputImageContent.FromFile` and `ImageTools.ToDataUrlAsync` both do this automatically.
-
----
-
-## Workflows
-
-A `Workflow` is an ordered sequence of named steps that the agent executes in turn. Each step carries an instruction for the model and an optional **verification callback** — a guardrail that must return `true` before the agent advances to the next step. If a step's guard fails, the agent is prompted to continue with the remaining steps until every guard passes or `maxRounds` is exhausted.
-
-### Defining a workflow
-
-```csharp
-var workflow = new Workflow("Process Invoice")
-    .Step(
-        name:        "Extract header",
-        instruction: "Extract the invoice number, date, vendor name, currency, and total amount.",
-        verify:      ctx => ctx.ToolInvocations.Any(t => t.ToolName == "save_invoice_header"))
-
-    .Step(
-        name:        "Extract line items",
-        instruction: "Extract every line item into the database.",
-        verify:      ctx => ctx.ToolInvocations.Any(t => t.ToolName == "save_invoice_lines"))
-
-    .Step(
-        name:        "Confirm totals",
-        instruction: "Sum the line item values and confirm they match the invoice total.",
-        verify:      ctx => ctx.ResponseText.Contains("match", StringComparison.OrdinalIgnoreCase));
-```
-
-Steps are verified **in order** — the agent cannot skip ahead. If a guard fails for step N, verification stops there even if later steps would have passed.
-
-### Running a workflow
-
-```csharp
-var result = await agent.RunWorkflowAsync(
-    workflow,
-    input:        "Process the attached invoice.",
-    mcpServerUrl: "http://localhost:5100/mcp",
-    maxRounds:    10);
-
-if (result.Completed)
-    Console.WriteLine("All steps completed.");
-else
-{
-    var pending = result.Steps.Where(s => s.Status == WorkflowStepStatus.Pending);
-    Console.WriteLine($"Incomplete steps: {string.Join(", ", pending.Select(s => s.Name))}");
-}
-```
-
-### WorkflowStep reference
-
-| Property | Type | Description |
-|----------|------|-------------|
-| `Name` | `string` | Short label used in prompts and `StepCompleted` events |
-| `Instruction` | `string` | Text appended to the system prompt describing what the model must do |
-| `Verify` | `Func<WorkflowContext, Task<bool>>?` | Async guardrail; `null` means the step auto-completes after each round |
-| `Status` | `WorkflowStepStatus` | `Pending` or `Completed` — updated by the agent after each round |
-
-### WorkflowContext (inside a verify callback)
-
-| Property | Description |
-|----------|-------------|
-| `ToolInvocations` | All tool calls made so far in this workflow run |
-| `ResponseText` | Accumulated model output across all rounds |
-
-### WorkflowResult
-
-| Property | Description |
-|----------|-------------|
-| `Completed` | `true` when every step reached `Completed` |
-| `Text` | Combined model response text from all rounds |
-| `Steps` | Final state of each step |
-| `ToolInvocations` | All tool calls made during the run, in order |
-
-### Guardrail patterns
-
-```csharp
-// Tool was called at least once
-verify: ctx => ctx.ToolInvocations.Any(t => t.ToolName == "save_data")
-
-// Tool was called with a specific argument value
-verify: ctx => ctx.ToolInvocations
-    .Any(t => t.ToolName == "save_data" && t.Arguments.Contains("\"status\":\"ok\""))
-
-// Model confirmed something in its output
-verify: ctx => ctx.ResponseText.Contains("confirmed", StringComparison.OrdinalIgnoreCase)
-
-// Async database check
-verify: async ctx =>
-{
-    await using var db = await dbFactory.CreateDbContextAsync();
-    return await db.Invoices.AnyAsync(i => i.Id == invoiceId && i.LineItems.Count > 0);
-}
-```
+> For images on private/internal hosts that the LM server cannot reach, pass a `data:image/â€¦;base64,â€¦` data URL. `InputImageContent.FromFile` does this automatically.
 
 ---
 
 ## Tool Context
 
-When an MCP request arrives, Agentic automatically captures all HTTP headers and makes them available to tool methods via `ToolContext`. This lets tools read authentication tokens, tenant IDs, correlation headers, or any other request metadata — without `IHttpContextAccessor`.
-
-### Declaring `ToolContext` on a tool method
-
-Add a `ToolContext` parameter to any `[Tool]` method. The framework injects it automatically (just like `CancellationToken`). It is invisible to the model — `ToolContext` never appears in the JSON schema sent to the LLM.
+When an MCP request arrives, Agentic captures all HTTP headers and makes them available to `[Tool]` methods via `ToolContext`. It is injected automatically â€” the model never sees it in the JSON schema.
 
 ```csharp
 public class InvoiceTools : IAgentToolSet
@@ -553,82 +655,25 @@ public class InvoiceTools : IAgentToolSet
     [Tool, Description("Save an invoice header to the database.")]
     public async Task<string> SaveInvoice(
         [ToolParam("Invoice number")] string invoiceNumber,
-        [ToolParam("Vendor name")]    string vendor,
-        [ToolParam("Total amount")]   decimal total,
         ToolContext context,
         CancellationToken ct)
     {
-        // Read any header forwarded from the original HTTP request
-        var scope  = context.GetHeader("X-Declaration-Scope");
         var tenant = context.GetHeader("X-Tenant-Id");
-
-        // ... save to database using scope / tenant ...
-
-        return $"Invoice {invoiceNumber} saved (scope={scope})";
+        // ... save using tenant context ...
+        return $"Invoice {invoiceNumber} saved (tenant={tenant})";
     }
 }
 ```
 
-### How headers flow
-
-```
-HTTP request → MCP endpoint → BuildToolContext(HttpContext)
-  ↓                                  ↓
-  All request headers        ToolContext { Headers, Properties }
-                                         ↓
-                              ToolRegistry.InvokeAsync
-                                         ↓
-                              BindArguments auto-injects ToolContext
-                                         ↓
-                              Your [Tool] method receives it
-```
-
-Every header on the inbound HTTP request is captured into a **case-insensitive** dictionary. Standard headers (`Authorization`, `Content-Type`, …) and custom headers (`X-Tenant-Id`, `X-Correlation-Id`, …) are all available.
-
-### Sending custom headers from a client
-
-Any HTTP client calling the MCP endpoint can attach headers that your tools will receive:
-
-```bash
-curl -X POST http://localhost:5100/mcp \
-  -H "Authorization: Bearer my-key" \
-  -H "X-Tenant-Id: acme-corp" \
-  -H "X-Declaration-Scope: import" \
-  -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"save_invoice","arguments":{"invoiceNumber":"INV-001","vendor":"Acme","total":1500}}}'
-```
-
-Inside the tool, `context.GetHeader("X-Tenant-Id")` returns `"acme-corp"`.
-
-### ToolContext API reference
+### `ToolContext` API
 
 | Member | Type | Description |
 |--------|------|-------------|
-| `Headers` | `IReadOnlyDictionary<string, string>` | All HTTP headers from the MCP request (case-insensitive keys) |
-| `Properties` | `IReadOnlyDictionary<string, object?>` | Arbitrary key-value data set by the caller |
-| `GetHeader(name)` | `string?` | Convenience — returns the header value or `null` |
-| `Get<T>(key)` | `T?` | Typed lookup into `Properties`; returns `default` if absent or wrong type |
-| `Empty` | `ToolContext` *(static)* | Singleton with no headers or properties |
-
-### Scope guardrail pattern
-
-A common use-case is enforcing business scope rules inside tools. For example, preventing cross-tenant writes or restricting operations to a declared customs scope:
-
-```csharp
-[Tool, Description("Delete a line item from the declaration.")]
-public Task<string> DeleteLineItem(
-    [ToolParam("Line item ID")] int lineItemId,
-    ToolContext context)
-{
-    var scope = context.GetHeader("X-Declaration-Scope")
-        ?? throw new InvalidOperationException("Missing X-Declaration-Scope header.");
-
-    if (scope != "import")
-        return Task.FromResult($"Denied: delete not allowed under scope '{scope}'.");
-
-    // ... perform delete ...
-    return Task.FromResult($"Line item {lineItemId} deleted.");
-}
-```
+| `Headers` | `IReadOnlyDictionary<string, string>` | All HTTP headers (case-insensitive keys) |
+| `Properties` | `IReadOnlyDictionary<string, object?>` | Arbitrary key-value data |
+| `GetHeader(name)` | `string?` | Returns header value or `null` |
+| `Get<T>(key)` | `T?` | Typed lookup into `Properties` |
+| `Empty` | *(static)* | Singleton with no headers or properties |
 
 ---
 
@@ -639,9 +684,7 @@ public Task<string> DeleteLineItem(
 | Tool | Description |
 |------|-------------|
 | `embed` | Generate an embedding vector for a text string |
-| `compare_similarity` | Cosine similarity between a reference text and a list of others |
-
-Register with:
+| `compare_similarity` | Cosine similarity between a reference text and a list of candidates |
 
 ```csharp
 toolRegistry.Register(new EmbeddingTools(lm));
@@ -651,4 +694,4 @@ toolRegistry.Register(new EmbeddingTools(lm));
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT â€” see [LICENSE](LICENSE).
