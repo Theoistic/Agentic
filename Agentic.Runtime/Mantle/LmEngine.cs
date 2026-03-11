@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Agentic.Runtime.Core;
 using System.Runtime.CompilerServices;
 using System.Text;
@@ -258,6 +259,9 @@ public sealed class LmEngine : IAsyncDisposable, IDisposable
         int maxOutputTokens,
         [EnumeratorCancellation] CancellationToken ct = default)
     {
+        using var activity = RuntimeTelemetry.StartActivity("runtime.engine.generate_tokens");
+        activity?.SetTag("agentic.runtime.max_output_tokens", maxOutputTokens);
+
         await _lock.WaitAsync(ct);
         try
         {
@@ -273,6 +277,9 @@ public sealed class LmEngine : IAsyncDisposable, IDisposable
                 if (IsEndOfGeneration(token))
                 {
                     _options.Logger?.Log(LogLevel.Debug, "generation", $"stop reason=eog token={token} emitted={emittedTokens} max={maxOutputTokens}");
+                    activity?.SetTag("agentic.runtime.tokens_emitted", emittedTokens);
+                    activity?.SetTag("agentic.runtime.stop_reason", "eog");
+                    RuntimeTelemetry.TokensGenerated.Add(emittedTokens);
                     yield break;
                 }
 
@@ -286,6 +293,9 @@ public sealed class LmEngine : IAsyncDisposable, IDisposable
             }
 
             _options.Logger?.Log(LogLevel.Debug, "generation", $"stop reason=max_output_tokens emitted={emittedTokens} max={maxOutputTokens}");
+            activity?.SetTag("agentic.runtime.tokens_emitted", emittedTokens);
+            activity?.SetTag("agentic.runtime.stop_reason", "max_output_tokens");
+            RuntimeTelemetry.TokensGenerated.Add(emittedTokens);
         }
         finally
         {

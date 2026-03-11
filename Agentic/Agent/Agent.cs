@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
@@ -58,16 +59,38 @@ public sealed class Agent : IAsyncDisposable
         ReasoningEffort? reasoning = null, InferenceConfig? inference = null,
         string? model = null, CancellationToken ct = default)
     {
-        Emit(AgentEventKind.UserInput, text: input);
-        var effectiveModel     = model ?? Options.Model;
-        var effectiveInference = inference ?? Options.Inference;
-        var tools              = BuildToolDefinitions(mcpServerUrl, serverLabel, allowedTools, mcpHeaders);
-        EmitRequestContext(Options.SystemPrompt, tools);
-        var resp = await _lm.RespondAsync(input,
-            instructions: Options.SystemPrompt, inference: effectiveInference,
-            tools: tools,
-            reasoning: reasoning ?? Options.Reasoning, model: effectiveModel, ct: ct);
-        return ParseOutput(resp);
+        using var activity = AgenticTelemetry.StartActivity("agent.run");
+        AgenticTelemetry.AgentRequests.Add(1, new KeyValuePair<string, object?>("agentic.agent.method", "Run"));
+        AgenticTelemetry.ActiveAgentOperations.Add(1);
+        var sw = Stopwatch.StartNew();
+        try
+        {
+            activity?.SetTag("agentic.agent.method", "Run");
+            activity?.SetTag("gen_ai.request.model", model ?? Options.Model);
+            Emit(AgentEventKind.UserInput, text: input);
+            var effectiveModel     = model ?? Options.Model;
+            var effectiveInference = inference ?? Options.Inference;
+            var tools              = BuildToolDefinitions(mcpServerUrl, serverLabel, allowedTools, mcpHeaders);
+            EmitRequestContext(Options.SystemPrompt, tools);
+            var resp = await _lm.RespondAsync(input,
+                instructions: Options.SystemPrompt, inference: effectiveInference,
+                tools: tools,
+                reasoning: reasoning ?? Options.Reasoning, model: effectiveModel, ct: ct);
+            var result = ParseOutput(resp);
+            RecordTokenUsage(activity, result.Usage);
+            return result;
+        }
+        catch (Exception ex)
+        {
+            AgenticTelemetry.RecordException(activity, ex);
+            throw;
+        }
+        finally
+        {
+            AgenticTelemetry.ActiveAgentOperations.Add(-1);
+            AgenticTelemetry.AgentRequestDuration.Record(sw.Elapsed.TotalMilliseconds,
+                new KeyValuePair<string, object?>("agentic.agent.method", "Run"));
+        }
     }
 
     /// <summary>Single-shot /v1/responses with text and images. Does not maintain conversation history.</summary>
@@ -87,16 +110,39 @@ public sealed class Agent : IAsyncDisposable
         ReasoningEffort? reasoning = null, InferenceConfig? inference = null,
         string? model = null, CancellationToken ct = default)
     {
-        Emit(AgentEventKind.UserInput, text: text);
-        var effectiveModel     = model ?? Options.Model;
-        var effectiveInference = inference ?? Options.Inference;
-        var tools              = BuildToolDefinitions(mcpServerUrl, serverLabel, allowedTools, mcpHeaders);
-        EmitRequestContext(Options.SystemPrompt, tools);
-        var resp = await _lm.RespondAsync([ResponseInput.User(text, images)],
-            instructions: Options.SystemPrompt, inference: effectiveInference,
-            tools: tools,
-            reasoning: reasoning ?? Options.Reasoning, model: effectiveModel, ct: ct);
-        return ParseOutput(resp);
+        using var activity = AgenticTelemetry.StartActivity("agent.run");
+        AgenticTelemetry.AgentRequests.Add(1, new KeyValuePair<string, object?>("agentic.agent.method", "Run"));
+        AgenticTelemetry.ActiveAgentOperations.Add(1);
+        var sw = Stopwatch.StartNew();
+        try
+        {
+            activity?.SetTag("agentic.agent.method", "Run");
+            activity?.SetTag("gen_ai.request.model", model ?? Options.Model);
+            activity?.SetTag("agentic.agent.has_images", true);
+            Emit(AgentEventKind.UserInput, text: text);
+            var effectiveModel     = model ?? Options.Model;
+            var effectiveInference = inference ?? Options.Inference;
+            var tools              = BuildToolDefinitions(mcpServerUrl, serverLabel, allowedTools, mcpHeaders);
+            EmitRequestContext(Options.SystemPrompt, tools);
+            var resp = await _lm.RespondAsync([ResponseInput.User(text, images)],
+                instructions: Options.SystemPrompt, inference: effectiveInference,
+                tools: tools,
+                reasoning: reasoning ?? Options.Reasoning, model: effectiveModel, ct: ct);
+            var result = ParseOutput(resp);
+            RecordTokenUsage(activity, result.Usage);
+            return result;
+        }
+        catch (Exception ex)
+        {
+            AgenticTelemetry.RecordException(activity, ex);
+            throw;
+        }
+        finally
+        {
+            AgenticTelemetry.ActiveAgentOperations.Add(-1);
+            AgenticTelemetry.AgentRequestDuration.Record(sw.Elapsed.TotalMilliseconds,
+                new KeyValuePair<string, object?>("agentic.agent.method", "Run"));
+        }
     }
 
     /// <summary>Multi-turn /v1/responses with <c>previous_response_id</c> chaining. Maintains conversation history across calls.</summary>
@@ -115,17 +161,39 @@ public sealed class Agent : IAsyncDisposable
         ReasoningEffort? reasoning = null, InferenceConfig? inference = null,
         string? model = null, CancellationToken ct = default)
     {
-        Emit(AgentEventKind.UserInput, text: input);
-        var tools              = BuildToolDefinitions(mcpServerUrl, serverLabel, allowedTools, mcpHeaders);
-        var effectiveReasoning = reasoning ?? Options.Reasoning;
-        var effectiveModel     = model ?? Options.Model;
-        var effectiveInference = inference ?? Options.Inference;
-        EmitRequestContext(Options.SystemPrompt, tools);
-        var resp = await _lm.RespondAsync(input, instructions: Options.SystemPrompt,
-            previousResponseId: _lastResponseId, inference: effectiveInference,
-            tools: tools, reasoning: effectiveReasoning, model: effectiveModel, ct: ct);
-        _lastResponseId = resp.ResponseId;
-        return ParseOutput(resp);
+        using var activity = AgenticTelemetry.StartActivity("agent.chat");
+        AgenticTelemetry.AgentRequests.Add(1, new KeyValuePair<string, object?>("agentic.agent.method", "Chat"));
+        AgenticTelemetry.ActiveAgentOperations.Add(1);
+        var sw = Stopwatch.StartNew();
+        try
+        {
+            activity?.SetTag("agentic.agent.method", "Chat");
+            activity?.SetTag("gen_ai.request.model", model ?? Options.Model);
+            Emit(AgentEventKind.UserInput, text: input);
+            var tools              = BuildToolDefinitions(mcpServerUrl, serverLabel, allowedTools, mcpHeaders);
+            var effectiveReasoning = reasoning ?? Options.Reasoning;
+            var effectiveModel     = model ?? Options.Model;
+            var effectiveInference = inference ?? Options.Inference;
+            EmitRequestContext(Options.SystemPrompt, tools);
+            var resp = await _lm.RespondAsync(input, instructions: Options.SystemPrompt,
+                previousResponseId: _lastResponseId, inference: effectiveInference,
+                tools: tools, reasoning: effectiveReasoning, model: effectiveModel, ct: ct);
+            _lastResponseId = resp.ResponseId;
+            var result = ParseOutput(resp);
+            RecordTokenUsage(activity, result.Usage);
+            return result;
+        }
+        catch (Exception ex)
+        {
+            AgenticTelemetry.RecordException(activity, ex);
+            throw;
+        }
+        finally
+        {
+            AgenticTelemetry.ActiveAgentOperations.Add(-1);
+            AgenticTelemetry.AgentRequestDuration.Record(sw.Elapsed.TotalMilliseconds,
+                new KeyValuePair<string, object?>("agentic.agent.method", "Chat"));
+        }
     }
 
     /// <summary>Multi-turn /v1/responses with text and images.
@@ -145,18 +213,41 @@ public sealed class Agent : IAsyncDisposable
         ReasoningEffort? reasoning = null, InferenceConfig? inference = null,
         string? model = null, CancellationToken ct = default)
     {
-        Emit(AgentEventKind.UserInput, text: text);
-        var tools              = BuildToolDefinitions(mcpServerUrl, serverLabel, allowedTools, mcpHeaders);
-        var effectiveReasoning = reasoning ?? Options.Reasoning;
-        var effectiveModel     = model ?? Options.Model;
-        var effectiveInference = inference ?? Options.Inference;
-        var userInput          = ResponseInput.User(text, images);
-        EmitRequestContext(Options.SystemPrompt, tools);
-        var resp = await _lm.RespondAsync([userInput], instructions: Options.SystemPrompt,
-            previousResponseId: _lastResponseId, inference: effectiveInference,
-            tools: tools, reasoning: effectiveReasoning, model: effectiveModel, ct: ct);
-        _lastResponseId = resp.ResponseId;
-        return ParseOutput(resp);
+        using var activity = AgenticTelemetry.StartActivity("agent.chat");
+        AgenticTelemetry.AgentRequests.Add(1, new KeyValuePair<string, object?>("agentic.agent.method", "Chat"));
+        AgenticTelemetry.ActiveAgentOperations.Add(1);
+        var sw = Stopwatch.StartNew();
+        try
+        {
+            activity?.SetTag("agentic.agent.method", "Chat");
+            activity?.SetTag("gen_ai.request.model", model ?? Options.Model);
+            activity?.SetTag("agentic.agent.has_images", true);
+            Emit(AgentEventKind.UserInput, text: text);
+            var tools              = BuildToolDefinitions(mcpServerUrl, serverLabel, allowedTools, mcpHeaders);
+            var effectiveReasoning = reasoning ?? Options.Reasoning;
+            var effectiveModel     = model ?? Options.Model;
+            var effectiveInference = inference ?? Options.Inference;
+            var userInput          = ResponseInput.User(text, images);
+            EmitRequestContext(Options.SystemPrompt, tools);
+            var resp = await _lm.RespondAsync([userInput], instructions: Options.SystemPrompt,
+                previousResponseId: _lastResponseId, inference: effectiveInference,
+                tools: tools, reasoning: effectiveReasoning, model: effectiveModel, ct: ct);
+            _lastResponseId = resp.ResponseId;
+            var result = ParseOutput(resp);
+            RecordTokenUsage(activity, result.Usage);
+            return result;
+        }
+        catch (Exception ex)
+        {
+            AgenticTelemetry.RecordException(activity, ex);
+            throw;
+        }
+        finally
+        {
+            AgenticTelemetry.ActiveAgentOperations.Add(-1);
+            AgenticTelemetry.AgentRequestDuration.Record(sw.Elapsed.TotalMilliseconds,
+                new KeyValuePair<string, object?>("agentic.agent.method", "Chat"));
+        }
     }
 
     /// <summary>Single-shot streaming
@@ -175,15 +266,37 @@ public sealed class Agent : IAsyncDisposable
         ReasoningEffort? reasoning = null, InferenceConfig? inference = null,
         string? model = null, CancellationToken ct = default)
     {
-        Emit(AgentEventKind.UserInput, text: input);
-        var effectiveModel     = model ?? Options.Model;
-        var effectiveInference = inference ?? Options.Inference;
-        var tools              = BuildToolDefinitions(mcpServerUrl, serverLabel, allowedTools, mcpHeaders);
-        EmitRequestContext(Options.SystemPrompt, tools);
-        return await ConsumeStreamAsync(_lm.RespondStreamingAsync(input,
-            instructions: Options.SystemPrompt, inference: effectiveInference,
-            tools: tools,
-            reasoning: reasoning ?? Options.Reasoning, model: effectiveModel, ct: ct));
+        using var activity = AgenticTelemetry.StartActivity("agent.run_stream");
+        AgenticTelemetry.AgentRequests.Add(1, new KeyValuePair<string, object?>("agentic.agent.method", "RunStream"));
+        AgenticTelemetry.ActiveAgentOperations.Add(1);
+        var sw = Stopwatch.StartNew();
+        try
+        {
+            activity?.SetTag("agentic.agent.method", "RunStream");
+            activity?.SetTag("gen_ai.request.model", model ?? Options.Model);
+            Emit(AgentEventKind.UserInput, text: input);
+            var effectiveModel     = model ?? Options.Model;
+            var effectiveInference = inference ?? Options.Inference;
+            var tools              = BuildToolDefinitions(mcpServerUrl, serverLabel, allowedTools, mcpHeaders);
+            EmitRequestContext(Options.SystemPrompt, tools);
+            var result = await ConsumeStreamAsync(_lm.RespondStreamingAsync(input,
+                instructions: Options.SystemPrompt, inference: effectiveInference,
+                tools: tools,
+                reasoning: reasoning ?? Options.Reasoning, model: effectiveModel, ct: ct));
+            RecordTokenUsage(activity, result.Usage);
+            return result;
+        }
+        catch (Exception ex)
+        {
+            AgenticTelemetry.RecordException(activity, ex);
+            throw;
+        }
+        finally
+        {
+            AgenticTelemetry.ActiveAgentOperations.Add(-1);
+            AgenticTelemetry.AgentRequestDuration.Record(sw.Elapsed.TotalMilliseconds,
+                new KeyValuePair<string, object?>("agentic.agent.method", "RunStream"));
+        }
     }
 
     /// <summary>Single-shot streaming /v1/responses with text and images, with real-time events. Does not maintain conversation history.</summary>
@@ -203,15 +316,38 @@ public sealed class Agent : IAsyncDisposable
         ReasoningEffort? reasoning = null, InferenceConfig? inference = null,
         string? model = null, CancellationToken ct = default)
     {
-        Emit(AgentEventKind.UserInput, text: text);
-        var effectiveModel     = model ?? Options.Model;
-        var effectiveInference = inference ?? Options.Inference;
-        var tools              = BuildToolDefinitions(mcpServerUrl, serverLabel, allowedTools, mcpHeaders);
-        EmitRequestContext(Options.SystemPrompt, tools);
-        return await ConsumeStreamAsync(_lm.RespondStreamingAsync([ResponseInput.User(text, images)],
-            instructions: Options.SystemPrompt, inference: effectiveInference,
-            tools: tools,
-            reasoning: reasoning ?? Options.Reasoning, model: effectiveModel, ct: ct));
+        using var activity = AgenticTelemetry.StartActivity("agent.run_stream");
+        AgenticTelemetry.AgentRequests.Add(1, new KeyValuePair<string, object?>("agentic.agent.method", "RunStream"));
+        AgenticTelemetry.ActiveAgentOperations.Add(1);
+        var sw = Stopwatch.StartNew();
+        try
+        {
+            activity?.SetTag("agentic.agent.method", "RunStream");
+            activity?.SetTag("gen_ai.request.model", model ?? Options.Model);
+            activity?.SetTag("agentic.agent.has_images", true);
+            Emit(AgentEventKind.UserInput, text: text);
+            var effectiveModel     = model ?? Options.Model;
+            var effectiveInference = inference ?? Options.Inference;
+            var tools              = BuildToolDefinitions(mcpServerUrl, serverLabel, allowedTools, mcpHeaders);
+            EmitRequestContext(Options.SystemPrompt, tools);
+            var result = await ConsumeStreamAsync(_lm.RespondStreamingAsync([ResponseInput.User(text, images)],
+                instructions: Options.SystemPrompt, inference: effectiveInference,
+                tools: tools,
+                reasoning: reasoning ?? Options.Reasoning, model: effectiveModel, ct: ct));
+            RecordTokenUsage(activity, result.Usage);
+            return result;
+        }
+        catch (Exception ex)
+        {
+            AgenticTelemetry.RecordException(activity, ex);
+            throw;
+        }
+        finally
+        {
+            AgenticTelemetry.ActiveAgentOperations.Add(-1);
+            AgenticTelemetry.AgentRequestDuration.Record(sw.Elapsed.TotalMilliseconds,
+                new KeyValuePair<string, object?>("agentic.agent.method", "RunStream"));
+        }
     }
 
     /// <summary>Multi-turn streaming /v1/responses with <c>previous_response_id</c> chaining and real-time events.</summary>
@@ -230,16 +366,38 @@ public sealed class Agent : IAsyncDisposable
         ReasoningEffort? reasoning = null, InferenceConfig? inference = null,
         string? model = null, CancellationToken ct = default)
     {
-        Emit(AgentEventKind.UserInput, text: input);
-        var tools              = BuildToolDefinitions(mcpServerUrl, serverLabel, allowedTools, mcpHeaders);
-        var effectiveReasoning = reasoning ?? Options.Reasoning;
-        var effectiveModel     = model ?? Options.Model;
-        var effectiveInference = inference ?? Options.Inference;
-        EmitRequestContext(Options.SystemPrompt, tools);
-        return await ConsumeStreamAsync(_lm.RespondStreamingAsync(input,
-            instructions: Options.SystemPrompt, previousResponseId: _lastResponseId,
-            inference: effectiveInference, tools: tools, reasoning: effectiveReasoning,
-            model: effectiveModel, ct: ct));
+        using var activity = AgenticTelemetry.StartActivity("agent.chat_stream");
+        AgenticTelemetry.AgentRequests.Add(1, new KeyValuePair<string, object?>("agentic.agent.method", "ChatStream"));
+        AgenticTelemetry.ActiveAgentOperations.Add(1);
+        var sw = Stopwatch.StartNew();
+        try
+        {
+            activity?.SetTag("agentic.agent.method", "ChatStream");
+            activity?.SetTag("gen_ai.request.model", model ?? Options.Model);
+            Emit(AgentEventKind.UserInput, text: input);
+            var tools              = BuildToolDefinitions(mcpServerUrl, serverLabel, allowedTools, mcpHeaders);
+            var effectiveReasoning = reasoning ?? Options.Reasoning;
+            var effectiveModel     = model ?? Options.Model;
+            var effectiveInference = inference ?? Options.Inference;
+            EmitRequestContext(Options.SystemPrompt, tools);
+            var result = await ConsumeStreamAsync(_lm.RespondStreamingAsync(input,
+                instructions: Options.SystemPrompt, previousResponseId: _lastResponseId,
+                inference: effectiveInference, tools: tools, reasoning: effectiveReasoning,
+                model: effectiveModel, ct: ct));
+            RecordTokenUsage(activity, result.Usage);
+            return result;
+        }
+        catch (Exception ex)
+        {
+            AgenticTelemetry.RecordException(activity, ex);
+            throw;
+        }
+        finally
+        {
+            AgenticTelemetry.ActiveAgentOperations.Add(-1);
+            AgenticTelemetry.AgentRequestDuration.Record(sw.Elapsed.TotalMilliseconds,
+                new KeyValuePair<string, object?>("agentic.agent.method", "ChatStream"));
+        }
     }
 
     /// <summary>Multi-turn streaming /v1/responses with text and images
@@ -259,17 +417,40 @@ public sealed class Agent : IAsyncDisposable
         ReasoningEffort? reasoning = null, InferenceConfig? inference = null,
         string? model = null, CancellationToken ct = default)
     {
-        Emit(AgentEventKind.UserInput, text: text);
-        var tools              = BuildToolDefinitions(mcpServerUrl, serverLabel, allowedTools, mcpHeaders);
-        var effectiveReasoning = reasoning ?? Options.Reasoning;
-        var effectiveModel     = model ?? Options.Model;
-        var effectiveInference = inference ?? Options.Inference;
-        var userInput          = ResponseInput.User(text, images);
-        EmitRequestContext(Options.SystemPrompt, tools);
-        return await ConsumeStreamAsync(_lm.RespondStreamingAsync([userInput],
-            instructions: Options.SystemPrompt, previousResponseId: _lastResponseId,
-            inference: effectiveInference, tools: tools, reasoning: effectiveReasoning,
-            model: effectiveModel, ct: ct));
+        using var activity = AgenticTelemetry.StartActivity("agent.chat_stream");
+        AgenticTelemetry.AgentRequests.Add(1, new KeyValuePair<string, object?>("agentic.agent.method", "ChatStream"));
+        AgenticTelemetry.ActiveAgentOperations.Add(1);
+        var sw = Stopwatch.StartNew();
+        try
+        {
+            activity?.SetTag("agentic.agent.method", "ChatStream");
+            activity?.SetTag("gen_ai.request.model", model ?? Options.Model);
+            activity?.SetTag("agentic.agent.has_images", true);
+            Emit(AgentEventKind.UserInput, text: text);
+            var tools              = BuildToolDefinitions(mcpServerUrl, serverLabel, allowedTools, mcpHeaders);
+            var effectiveReasoning = reasoning ?? Options.Reasoning;
+            var effectiveModel     = model ?? Options.Model;
+            var effectiveInference = inference ?? Options.Inference;
+            var userInput          = ResponseInput.User(text, images);
+            EmitRequestContext(Options.SystemPrompt, tools);
+            var result = await ConsumeStreamAsync(_lm.RespondStreamingAsync([userInput],
+                instructions: Options.SystemPrompt, previousResponseId: _lastResponseId,
+                inference: effectiveInference, tools: tools, reasoning: effectiveReasoning,
+                model: effectiveModel, ct: ct));
+            RecordTokenUsage(activity, result.Usage);
+            return result;
+        }
+        catch (Exception ex)
+        {
+            AgenticTelemetry.RecordException(activity, ex);
+            throw;
+        }
+        finally
+        {
+            AgenticTelemetry.ActiveAgentOperations.Add(-1);
+            AgenticTelemetry.AgentRequestDuration.Record(sw.Elapsed.TotalMilliseconds,
+                new KeyValuePair<string, object?>("agentic.agent.method", "ChatStream"));
+        }
     }
 
     // ── Workflow execution ────────────────────────────────────────────────
@@ -296,55 +477,83 @@ public sealed class Agent : IAsyncDisposable
         ReasoningEffort? reasoning = null, InferenceConfig? inference = null,
         string? model = null, int maxRounds = 10, CancellationToken ct = default)
     {
-        workflow.Reset();
-        Emit(AgentEventKind.UserInput, text: input);
-
-        var allInvocations     = new List<ToolInvocation>();
-        var allText            = new StringBuilder();
-        var systemPrompt       = BuildWorkflowPrompt(workflow, Options.SystemPrompt);
-        var mcpTools           = BuildToolDefinitions(mcpServerUrl, serverLabel, allowedTools, mcpHeaders);
-        var currentInput       = input;
-        var effectiveReasoning = reasoning ?? Options.Reasoning;
-        var effectiveModel     = model ?? Options.Model;
-        var effectiveInference = inference ?? Options.Inference;
-        EmitRequestContext(systemPrompt, mcpTools);
-
-        for (int round = 0; round < maxRounds; round++)
+        using var activity = AgenticTelemetry.StartActivity("agent.workflow");
+        AgenticTelemetry.WorkflowExecutions.Add(1, new KeyValuePair<string, object?>("agentic.workflow.name", workflow.Name));
+        AgenticTelemetry.ActiveAgentOperations.Add(1);
+        var sw = Stopwatch.StartNew();
+        try
         {
-            var response = await ConsumeStreamAsync(
-                _lm.RespondStreamingAsync(currentInput,
-                    instructions: systemPrompt, previousResponseId: _lastResponseId,
-                    inference: effectiveInference, tools: mcpTools,
-                    reasoning: effectiveReasoning, model: effectiveModel, ct: ct));
+            activity?.SetTag("agentic.workflow.name", workflow.Name);
+            activity?.SetTag("agentic.workflow.steps", workflow.Steps.Count);
+            activity?.SetTag("agentic.workflow.max_rounds", maxRounds);
+            activity?.SetTag("gen_ai.request.model", model ?? Options.Model);
 
-            allInvocations.AddRange(response.ToolInvocations);
-            if (allText.Length > 0) allText.AppendLine();
-            allText.Append(response.Text);
+            workflow.Reset();
+            Emit(AgentEventKind.UserInput, text: input);
 
-            var ctx = new WorkflowContext
+            var allInvocations     = new List<ToolInvocation>();
+            var allText            = new StringBuilder();
+            var systemPrompt       = BuildWorkflowPrompt(workflow, Options.SystemPrompt);
+            var mcpTools           = BuildToolDefinitions(mcpServerUrl, serverLabel, allowedTools, mcpHeaders);
+            var currentInput       = input;
+            var effectiveReasoning = reasoning ?? Options.Reasoning;
+            var effectiveModel     = model ?? Options.Model;
+            var effectiveInference = inference ?? Options.Inference;
+            EmitRequestContext(systemPrompt, mcpTools);
+
+            for (int round = 0; round < maxRounds; round++)
             {
-                ToolInvocations = allInvocations,
-                ResponseText = allText.ToString(),
-            };
-            await VerifyStepsAsync(workflow, ctx);
+                var response = await ConsumeStreamAsync(
+                    _lm.RespondStreamingAsync(currentInput,
+                        instructions: systemPrompt, previousResponseId: _lastResponseId,
+                        inference: effectiveInference, tools: mcpTools,
+                        reasoning: effectiveReasoning, model: effectiveModel, ct: ct));
 
-            if (workflow.Steps.All(s => s.Status == WorkflowStepStatus.Completed))
-            {
-                Emit(AgentEventKind.WorkflowCompleted, text: workflow.Name);
-                break;
+                allInvocations.AddRange(response.ToolInvocations);
+                if (allText.Length > 0) allText.AppendLine();
+                allText.Append(response.Text);
+
+                var ctx = new WorkflowContext
+                {
+                    ToolInvocations = allInvocations,
+                    ResponseText = allText.ToString(),
+                };
+                await VerifyStepsAsync(workflow, ctx);
+
+                if (workflow.Steps.All(s => s.Status == WorkflowStepStatus.Completed))
+                {
+                    Emit(AgentEventKind.WorkflowCompleted, text: workflow.Name);
+                    break;
+                }
+
+                var pending = workflow.Steps.Where(s => s.Status != WorkflowStepStatus.Completed);
+                currentInput = $"Continue with the remaining workflow steps: {string.Join(", ", pending.Select(s => s.Name))}";
             }
 
-            var pending = workflow.Steps.Where(s => s.Status != WorkflowStepStatus.Completed);
-            currentInput = $"Continue with the remaining workflow steps: {string.Join(", ", pending.Select(s => s.Name))}";
-        }
+            var completed = workflow.Steps.All(s => s.Status == WorkflowStepStatus.Completed);
+            activity?.SetTag("agentic.workflow.completed", completed);
+            activity?.SetTag("agentic.workflow.completed_steps",
+                workflow.Steps.Count(s => s.Status == WorkflowStepStatus.Completed));
 
-        return new()
+            return new()
+            {
+                Text = allText.ToString(),
+                Completed = completed,
+                Steps = workflow.Steps.ToList(),
+                ToolInvocations = allInvocations,
+            };
+        }
+        catch (Exception ex)
         {
-            Text = allText.ToString(),
-            Completed = workflow.Steps.All(s => s.Status == WorkflowStepStatus.Completed),
-            Steps = workflow.Steps.ToList(),
-            ToolInvocations = allInvocations,
-        };
+            AgenticTelemetry.RecordException(activity, ex);
+            throw;
+        }
+        finally
+        {
+            AgenticTelemetry.ActiveAgentOperations.Add(-1);
+            AgenticTelemetry.AgentRequestDuration.Record(sw.Elapsed.TotalMilliseconds,
+                new KeyValuePair<string, object?>("agentic.agent.method", "Workflow"));
+        }
     }
 
     private async Task VerifyStepsAsync(Workflow workflow, WorkflowContext ctx)
@@ -647,6 +856,23 @@ public sealed class Agent : IAsyncDisposable
         }
         catch { }
         return output;
+    }
+
+    private static void RecordTokenUsage(Activity? activity, ResponseUsage? usage)
+    {
+        if (usage is null) return;
+        if (usage.InputTokens > 0)
+        {
+            activity?.SetTag("gen_ai.usage.input_tokens", usage.InputTokens);
+            AgenticTelemetry.TokensInput.Add(usage.InputTokens);
+        }
+        if (usage.OutputTokens > 0)
+        {
+            activity?.SetTag("gen_ai.usage.output_tokens", usage.OutputTokens);
+            AgenticTelemetry.TokensOutput.Add(usage.OutputTokens);
+        }
+        if (usage.TotalTokens > 0)
+            activity?.SetTag("gen_ai.usage.total_tokens", usage.TotalTokens);
     }
 
     public async ValueTask DisposeAsync()
