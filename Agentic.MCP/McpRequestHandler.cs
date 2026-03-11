@@ -52,7 +52,7 @@ public sealed class McpServerOptions
 /// </summary>
 public sealed class McpRequestHandler
 {
-    private readonly Agentic.ToolRegistry _tools;
+    private readonly ToolRegistry _tools;
     private readonly ResourceRegistry _resources;
     private readonly PromptRegistry _prompts;
     private readonly McpServerOptions _options;
@@ -65,7 +65,7 @@ public sealed class McpRequestHandler
     };
 
     /// <summary>Initialises the handler with all required services (resolved from DI).</summary>
-    public McpRequestHandler(Agentic.ToolRegistry tools, ResourceRegistry resources, PromptRegistry prompts,
+    public McpRequestHandler(ToolRegistry tools, ResourceRegistry resources, PromptRegistry prompts,
         McpServerOptions options, ILogger<McpRequestHandler> logger)
     {
         _tools = tools;
@@ -145,7 +145,7 @@ public sealed class McpRequestHandler
 
     private JsonRpcResponse HandleToolsList(JsonRpcRequest request)
     {
-        var defaultSchema = Agentic.ToolSchema.Parse("""{"type":"object"}""");
+        var defaultSchema = ToolSchema.Parse("""{"type":"object"}""");
         var tools = _tools.GetAllDescriptors().Select(d => new McpToolInfo
         {
             Name = d.Name,
@@ -184,7 +184,7 @@ public sealed class McpRequestHandler
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
             _logger.LogWarning("MCP client disconnected while tool '{Tool}' was running", cp.Name);
-            throw;  // let HandleAsync's catch log and return null
+            throw;
         }
         catch (OperationCanceledException) when (timeoutCts?.IsCancellationRequested == true)
         {

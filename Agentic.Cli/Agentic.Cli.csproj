@@ -15,6 +15,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Agentic\Agentic.csproj" />
+    <ProjectReference Include="..\Agentic.MCP\Agentic.MCP.csproj" />
   </ItemGroup>
 
   <ItemGroup>

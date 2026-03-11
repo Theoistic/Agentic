@@ -3,6 +3,18 @@ using System.Text.Json.Serialization;
 
 namespace Agentic.Mcp;
 
+file static class McpJson
+{
+    private static readonly JsonSerializerOptions s_options = new() { DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull };
+
+    public static JsonElement SerializeToElement(object value)
+    {
+        var json = JsonSerializer.Serialize(value, s_options);
+        using var document = JsonDocument.Parse(json);
+        return document.RootElement.Clone();
+    }
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 //  JSON-RPC 2.0
 // ═══════════════════════════════════════════════════════════════════════════
@@ -41,7 +53,7 @@ public sealed class JsonRpcResponse
 
     /// <summary>Creates a successful response with the given result object.</summary>
     public static JsonRpcResponse Success(JsonElement? id, object result) => new()
-    { Id = id, Result = Agentic.ToolSchema.SerializeToElement(result) };
+    { Id = id, Result = McpJson.SerializeToElement(result) };
 
     /// <summary>Creates an error response with the given error code and message.</summary>
     public static JsonRpcResponse Fail(JsonElement? id, int code, string message) => new()

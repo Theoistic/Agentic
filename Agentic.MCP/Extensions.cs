@@ -17,7 +17,7 @@ public static class McpServerExtensions
     };
 
     /// <summary>
-    /// Registers the MCP server services: <see cref="McpServerOptions"/>, <see cref="Agentic.ToolRegistry"/>,
+    /// Registers the MCP server services: <see cref="McpServerOptions"/>, <see cref="ToolRegistry"/>,
     /// <see cref="ResourceRegistry"/>, <see cref="PromptRegistry"/>, and <see cref="McpRequestHandler"/>.
     /// </summary>
     /// <param name="services">The service collection to add to.</param>
@@ -27,7 +27,7 @@ public static class McpServerExtensions
         var options = new McpServerOptions();
         configure?.Invoke(options);
         services.AddSingleton(options);
-        services.AddSingleton<Agentic.ToolRegistry>();
+        services.AddSingleton<ToolRegistry>();
         services.AddSingleton<ResourceRegistry>();
         services.AddSingleton<PromptRegistry>();
         services.AddSingleton<McpRequestHandler>();
@@ -155,12 +155,12 @@ public static class McpServerExtensions
         await ctx.Response.WriteAsJsonAsync(response, s_json);
     }
 
-    private static Agentic.ToolContext BuildToolContext(HttpContext ctx)
+    private static ToolContext BuildToolContext(HttpContext ctx)
     {
         var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach (var (key, value) in ctx.Request.Headers)
             headers[key] = value.ToString();
-        return new Agentic.ToolContext(headers);
+        return new ToolContext(headers);
     }
 
     private static async Task HandleGet(HttpContext ctx, McpRequestHandler handler)

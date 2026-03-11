@@ -1,5 +1,6 @@
 <Solution>
   <Project Path="Agentic.Cli/Agentic.Cli.csproj" Id="3ac86002-6f4f-4437-ad7d-44d41239c11e" />
+  <Project Path="Agentic.MCP/Agentic.MCP.csproj" Id="b8aea829-77b1-47e0-ad27-50418ec19fb3" />
   <Project Path="Agentic.Runtime.WebServer/Agentic.Runtime.WebServer.csproj" />
   <Project Path="Agentic.Runtime/Agentic.Runtime.csproj" />
   <Project Path="Agentic/Agentic.csproj" />
