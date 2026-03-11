@@ -1,0 +1,33 @@
+@Agentic.Runtime.WebServer_HostAddress = http://localhost:5225
+
+### Create a Response with Reasoning and Multi-modal items
+POST {{Agentic.Runtime.WebServer_HostAddress}}/v1/responses
+Content-Type: application/json
+
+{
+  "model": "gpt-5.1",
+  "input": [
+    {
+      "type": "message",
+      "role": "user",
+      "content": "Perform a file search on the recent Q1 report."
+    }
+  ],
+  "tools": [
+    { "type": "file_search" },
+    { "type": "web_search_preview" }
+  ],
+  "max_output_tokens": 1000
+}
+
+### Retrieve a Response by ID
+GET {{Agentic.Runtime.WebServer_HostAddress}}/v1/responses/resp_abc123
+
+### Compact a Response (Context Management)
+POST {{Agentic.Runtime.WebServer_HostAddress}}/v1/responses/compact
+Content-Type: application/json
+
+{
+  "model": "o3",
+  "previous_response_id": "resp_abc123"
+}
