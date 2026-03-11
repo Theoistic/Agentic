@@ -2665,7 +2665,7 @@ public static class MiniJinjaChatTemplate
         foreach (Match match in Regex.Matches(text, "```(?:json)?\\s*(.*?)```", RegexOptions.Singleline | RegexOptions.IgnoreCase))
         {
             string block = match.Groups[1].Value.Trim();
-            if (!string.IsNullOrWhiteSpace(block))
+            if (!string.IsNullOrWhiteSpace(block) && LooksLikeCompleteJson(block))
                 yield return block;
         }
 
@@ -2674,9 +2674,77 @@ public static class MiniJinjaChatTemplate
         if (firstBrace >= 0 && lastBrace > firstBrace)
         {
             string body = text.Substring(firstBrace, lastBrace - firstBrace + 1).Trim();
-            if (!string.IsNullOrWhiteSpace(body))
+            if (!string.IsNullOrWhiteSpace(body) && LooksLikeCompleteJson(body))
                 yield return body;
         }
+    }
+
+    private static bool LooksLikeCompleteJson(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return false;
+
+        text = text.Trim();
+        if (!((text[0] == '{' && text[^1] == '}') || (text[0] == '[' && text[^1] == ']')))
+            return false;
+
+        int braceDepth = 0;
+        int bracketDepth = 0;
+        bool escaping = false;
+        char quote = '\0';
+
+        for (int i = 0; i < text.Length; i++)
+        {
+            char c = text[i];
+
+            if (quote != '\0')
+            {
+                if (escaping)
+                {
+                    escaping = false;
+                    continue;
+                }
+
+                if (c == '\\')
+                {
+                    escaping = true;
+                    continue;
+                }
+
+                if (c == quote)
+                    quote = '\0';
+
+                continue;
+            }
+
+            if (c == '"' || c == '\'')
+            {
+                quote = c;
+                continue;
+            }
+
+            switch (c)
+            {
+                case '{':
+                    braceDepth++;
+                    break;
+                case '}':
+                    braceDepth--;
+                    if (braceDepth < 0)
+                        return false;
+                    break;
+                case '[':
+                    bracketDepth++;
+                    break;
+                case ']':
+                    bracketDepth--;
+                    if (bracketDepth < 0)
+                        return false;
+                    break;
+            }
+        }
+
+        return quote == '\0' && !escaping && braceDepth == 0 && bracketDepth == 0;
     }
 
     private static bool TryParseJsonDocument(string json, out List<ToolCall> calls)

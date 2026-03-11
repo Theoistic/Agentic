@@ -259,6 +259,7 @@ public sealed class NativeBackend : ILLMBackend, IAsyncDisposable, IDisposable
             Instructions = instructions,
             Tools = CreateToolDefinitions(tools),
             PreviousResponseId = previousResponseId,
+            MaxOutputTokens = null,
             Stream = stream,
             Temperature = inference?.Temperature is double temperature ? (float)temperature : null,
             TopP = inference?.TopP is double topP ? (float)topP : null,

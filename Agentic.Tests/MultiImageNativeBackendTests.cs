@@ -34,6 +34,8 @@ public sealed class MultiImageNativeBackendTests
     [TestMethod]
     public async Task AnalyzeMultiPageInvoice_AllPagesAsImages_ResponseContainsDocumentContent()
     {
+        using var logWriter = new StringWriter();
+
         var modelPath = Environment.GetEnvironmentVariable("AGENTIC_NATIVE_MODEL_PATH")
             ?? @"C:\Users\Theo\.lmstudio\models\lmstudio-community\Qwen3.5-9B-GGUF\Qwen3.5-9B-Q4_K_M.gguf";
         if (!File.Exists(modelPath))
@@ -53,7 +55,7 @@ public sealed class MultiImageNativeBackendTests
         {
             ModelPath        = modelPath,
             ToolRegistry     = new Mantle.ToolRegistry(),
-            Logger           = Mantle.ConsoleErrorLogger.Instance,
+            Logger           = new Mantle.TextWriterLogger(logWriter),
             Compaction       = new Mantle.ConversationCompactionOptions(16384, ReservedForGeneration: 4096),
             ContextTokens    = 16384,
             BatchTokens      = 4096,
@@ -80,11 +82,15 @@ public sealed class MultiImageNativeBackendTests
             reasoning: ReasoningEffort.None);
 
         var text = response.Text;
+        var logs = logWriter.ToString();
+
         Assert.IsNotNull(text);
         Assert.IsTrue(text.Length > 0, "The model returned an empty response.");
+        Assert.IsTrue(logs.Contains("[generation] stop reason=", StringComparison.Ordinal), "Expected generation diagnostics to be captured in the in-memory logger.");
 
         Console.WriteLine($"[Pages rendered: {images.Count}]");
         Console.WriteLine($"[Usage: input={response.Usage?.InputTokens}, output={response.Usage?.OutputTokens}, total={response.Usage?.TotalTokens}]");
+        Console.WriteLine(logs);
         Console.WriteLine(text);
     }
 
