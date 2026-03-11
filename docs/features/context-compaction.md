@@ -15,90 +15,113 @@ nav_order: 5
 
 ---
 
-Long conversations eventually exceed the model's context window. Context compaction automatically summarises older turns into a structured checkpoint and continues from there — preserving important information without hitting the token limit.
+Long conversations eventually exceed the model's context window. Context compaction automatically trims or summarises older turns so the session can continue seamlessly without hitting the token limit.
+
+> Context compaction is configured via `LmSessionOptions.Compaction` and applies to sessions created through `NativeBackend`. See [NativeBackend](native-backend) for setup details.
 
 ## Setup
 
+Pass a `ConversationCompactionOptions` record when constructing `LmSessionOptions`:
+
 ```csharp
-var agent = new Agent(lm, new AgentOptions
+using Agentic.Runtime.Mantle;
+
+var sessionOptions = new LmSessionOptions
 {
-    Compaction = new CompactionOptions
+    ModelPath    = @"/path/to/model.gguf",
+    ToolRegistry = new ToolRegistry(),
+    Compaction   = new ConversationCompactionOptions(
+        MaxInputTokens:        4096,
+        ReservedForGeneration: 256),
+};
+```
+
+## `ConversationCompactionOptions` Reference
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `MaxInputTokens` | *(required)* | Total token budget for the prompt window |
+| `ReservedForGeneration` | `512` | Tokens reserved for the model's output; deducted from `MaxInputTokens` to get the effective prompt budget |
+| `Strategy` | `PinnedSystemFifo` | How older messages are discarded (see [Strategies](#strategies)) |
+| `Level` | `Balanced` | Aggressiveness of compaction (see [Levels](#levels)) |
+| `AlwaysKeepSystem` | `true` | Prevent the system prompt from being evicted |
+| `HotTrailMessages` | `4` | Minimum number of recent messages always kept verbatim |
+
+The effective prompt budget is `MaxInputTokens - ReservedForGeneration`.
+
+## Strategies
+
+| `ContextCompactionStrategy` | Description |
+|-----------------------------|-------------|
+| `FifoSlidingWindow` | Drop the oldest messages first (pure FIFO) |
+| `PinnedSystemFifo` | Keep the system prompt pinned; drop oldest non-system messages |
+| `MiddleOutElision` | Keep the beginning and end of the conversation; elide the middle |
+| `HeuristicPruning` | Drop low-signal messages first (tool call results, short assistant turns) |
+| `RollingSummarization` | Requires a custom `IConversationCompactor` implementation |
+| `VectorAugmentedRecall` | Requires a custom `IConversationCompactor` implementation |
+
+## Levels
+
+| `ConversationCompactionLevel` | What is preserved |
+|-------------------------------|------------------|
+| `Light` | Minimal retention — fast, lowest token overhead |
+| `Balanced` | Balanced retention of context and important turns |
+| `Aggressive` | Maximum compression — retains only the most essential turns |
+
+## Custom Compactor
+
+For `RollingSummarization` or `VectorAugmentedRecall`, supply your own `IConversationCompactor`:
+
+```csharp
+public class MySummarizingCompactor : IConversationCompactor
+{
+    public IReadOnlyList<ChatMessage> Compact(
+        IReadOnlyList<ChatMessage> messages,
+        ConversationCompactionContext context)
     {
-        MaxContextTokens    = 128_000,
-        CompactionThreshold = 0.85,      // compact at 85% usage
-        DefaultLevel        = CompactionLevel.Standard,
-        HotTailTurns        = 4,         // keep the last 4 user turns verbatim
-        AutoCompact         = true,      // compact automatically when threshold is reached
-    },
-});
+        // your summarization logic here
+        return messages;
+    }
+}
+
+var sessionOptions = new LmSessionOptions
+{
+    ModelPath            = @"/path/to/model.gguf",
+    ToolRegistry         = new ToolRegistry(),
+    Compaction           = new ConversationCompactionOptions(MaxInputTokens: 8192),
+    ConversationCompactor = new MySummarizingCompactor(),
+};
 ```
-
-## CompactionOptions Reference
-
-| Property | Default | Description |
-|----------|---------|-------------|
-| `MaxContextTokens` | required | Total token budget for the context window |
-| `CompactionThreshold` | `0.85` | Fraction of `MaxContextTokens` that triggers auto-compaction |
-| `DefaultLevel` | `Standard` | Default summarisation depth |
-| `HotTailTurns` | `4` | How many recent user turns to keep verbatim after compaction |
-| `AutoCompact` | `true` | Automatically compact when the threshold is reached |
-
-## Compaction Levels
-
-| Level | What is preserved |
-|-------|------------------|
-| `Light` | Goals and next actions only — minimal tokens |
-| `Standard` | Goals, decisions, status, and next steps |
-| `Detailed` | Full nuance — decisions, rationale, edge cases, and key outputs |
-
-Choose `Light` for long exploratory chats where only the final goal matters.  
-Choose `Detailed` for technical or business-critical work where reasoning must be preserved.
-
-## Manual Compaction
-
-You can trigger compaction at any time, regardless of the threshold:
-
-```csharp
-var checkpoint = await agent.CompactAsync(CompactionLevel.Detailed);
-Console.WriteLine(checkpoint.Summary);
-```
-
-## Resetting Without Compaction
-
-To start fresh without compacting:
-
-```csharp
-agent.ResetConversation();
-```
-
-This clears the full history. Any information not yet compacted is lost.
-
-## How It Works
-
-When the estimated token count exceeds `MaxContextTokens × CompactionThreshold`:
-
-1. The agent pauses before the next request
-2. It sends a summarisation prompt to the model, asking it to produce a structured checkpoint
-3. The checkpoint replaces the older turns in the history
-4. The last `HotTailTurns` user messages are kept verbatim so the model has immediate context
-5. The conversation continues from the checkpoint
-
-The checkpoint is formatted as a structured document, not a flat summary, so key facts (decisions, outputs, next steps) are clearly separated and easy for the model to parse.
 
 ## Example: Long Research Session
 
 ```csharp
+using Agentic;
+using Agentic.Runtime.Core;
+using Agentic.Runtime.Mantle;
+
+var sessionOptions = new LmSessionOptions
+{
+    ModelPath    = @"/path/to/model.gguf",
+    ToolRegistry = new ToolRegistry(),
+    Compaction   = new ConversationCompactionOptions(
+        MaxInputTokens:        8192,
+        ReservedForGeneration: 512,
+        Strategy:              ContextCompactionStrategy.PinnedSystemFifo,
+        Level:                 ConversationCompactionLevel.Balanced,
+        AlwaysKeepSystem:      true,
+        HotTrailMessages:      6),
+};
+
+await using var lm = new NativeBackend(
+    sessionOptions,
+    backend:         LlamaBackend.Cuda,
+    cudaVersion:     "12.4",
+    installProgress: new Progress<(string msg, double pct)>(p => Console.Write($"\r[{p.pct:F0}%] {p.msg}")));
+
 var agent = new Agent(lm, new AgentOptions
 {
     SystemPrompt = "You are a research assistant.",
-    Compaction = new CompactionOptions
-    {
-        MaxContextTokens    = 32_000,
-        CompactionThreshold = 0.80,
-        DefaultLevel        = CompactionLevel.Detailed,
-        HotTailTurns        = 6,
-        AutoCompact         = true,
-    },
     OnEvent = e =>
     {
         if (e.Kind == AgentEventKind.TextDelta)

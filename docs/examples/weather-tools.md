@@ -66,7 +66,7 @@ await app.RunAsync();   // Listening on http://localhost:5100
 ## Agent
 
 ```csharp
-var lm = new LM(new LMConfig
+var lm = new OpenAIBackend(new LMConfig
 {
     Endpoint  = "http://localhost:1234",
     ModelName = "your-model-name",

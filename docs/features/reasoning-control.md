@@ -28,10 +28,10 @@ For models that support chain-of-thought reasoning (e.g. Qwen3), Agentic lets yo
 
 ## Level 1 — Global default (LMConfig)
 
-Applies to every request made through this `LM` instance unless overridden.
+Applies to every request made through this `OpenAIBackend` instance unless overridden.
 
 ```csharp
-var lm = new LM(new LMConfig
+var lm = new OpenAIBackend(new LMConfig
 {
     Endpoint  = "http://localhost:1234",
     ModelName = "Qwen/Qwen3-30B-A3B",

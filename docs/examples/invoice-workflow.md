@@ -112,7 +112,7 @@ var workflow = new Workflow("Process Invoice")
 ## Running the Workflow
 
 ```csharp
-var lm = new LM(new LMConfig
+var lm = new OpenAIBackend(new LMConfig
 {
     Endpoint  = "http://localhost:1234",
     ModelName = "your-vision-model",

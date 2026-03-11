@@ -43,9 +43,9 @@ await agent.ChatStreamAsync(
     images: ["https://example.com/chart1.png", "https://example.com/chart2.png"]);
 ```
 
-## Direct Vision Call via LM
+## Direct Vision Call via Backend
 
-You can also call the LM directly with image inputs:
+You can also call the backend directly with image inputs:
 
 ```csharp
 var result = await lm.RespondAsync(
@@ -76,7 +76,7 @@ The library detects the format automatically and converts local files to base64 
 ## Example: Invoice OCR
 
 ```csharp
-var lm = new LM(new LMConfig
+var lm = new OpenAIBackend(new LMConfig
 {
     Endpoint  = "http://localhost:1234",
     ModelName = "llava-v1.6-34b",

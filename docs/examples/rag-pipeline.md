@@ -17,7 +17,7 @@ using Microsoft.Extensions.DependencyInjection;
 
 var services = new ServiceCollection();
 
-services.AddSingleton<LM>(_ => new LM(new LMConfig
+services.AddSingleton<ILLMBackend>(_ => new OpenAIBackend(new LMConfig
 {
     Endpoint       = "http://localhost:1234",
     ModelName      = "your-model-name",
@@ -28,7 +28,7 @@ services.AddSingleton<LM>(_ => new LM(new LMConfig
 services.AddStore();
 
 var sp = services.BuildServiceProvider();
-var lm    = sp.GetRequiredService<LM>();
+var lm    = sp.GetRequiredService<ILLMBackend>();
 var store = sp.GetRequiredService<IStore>();
 ```
 
@@ -127,9 +127,9 @@ Combine RAG retrieval with tool access for dynamic knowledge bases:
 public class KnowledgeTools : IAgentToolSet
 {
     private readonly ICollection<KnowledgeArticle> _articles;
-    private readonly LM _lm;
+    private readonly ILLMBackend _lm;
 
-    public KnowledgeTools(IStore store, LM lm)
+    public KnowledgeTools(IStore store, ILLMBackend lm)
     {
         _articles = store.Collection<KnowledgeArticle>("knowledge");
         _lm       = lm;
