@@ -8,6 +8,7 @@ using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.Formats.Jpeg;
 using SixLabors.ImageSharp.PixelFormats;
 using SixLabors.ImageSharp.Processing;
+using Agentic.Storage;
 
 namespace Agentic.Cli;
 
@@ -75,7 +76,7 @@ public class TollInvoiceDbContext : DbContext
 
 // ── Tools ─────────────────────────────────────────────────────────────────
 
-public class HsCodeAnalyzerTools(LM lm, ICollection<HSDescription> hs, TollInvoiceDbContext db) : IDisposableToolSet
+public class HsCodeAnalyzerTools(LM lm, IStoreCollection<HSDescription> hs, TollInvoiceDbContext db) : IDisposableToolSet
 {
     private const string DataFile  = "taks_records.json";
     private const int    BatchSize = 50;

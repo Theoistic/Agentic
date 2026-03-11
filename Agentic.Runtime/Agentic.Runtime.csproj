@@ -22,4 +22,8 @@
     <PackageReference Include="Pgvector" Version="0.3.0" />
   </ItemGroup>
 
+  <ItemGroup>
+    <ProjectReference Include="..\Agentic.Storage\Agentic.Storage.csproj" />
+  </ItemGroup>
+
 </Project>

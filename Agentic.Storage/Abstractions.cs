@@ -3,7 +3,7 @@ using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
-namespace Agentic;
+namespace Agentic.Storage;
 
 // ═══════════════════════════════════════════════════════════════════════════
 //  Storage abstractions
@@ -22,7 +22,7 @@ public sealed record SearchResult<T>(string Id, T Document, float Score) where T
 /// When no explicit embedding is supplied, an upsert preserves any previously
 /// stored embedding (useful for updating document fields without re-embedding).
 /// </summary>
-public interface ICollection<T> where T : class
+public interface IStoreCollection<T> where T : class
 {
     /// <summary>Insert with an auto-generated ID. Returns the new ID.</summary>
     Task<string> InsertAsync(T doc, float[]? embedding = null, CancellationToken ct = default);
@@ -45,7 +45,7 @@ public interface ICollection<T> where T : class
 public interface IStore : IDisposable
 {
     /// <summary>Gets or creates a named collection for documents of type <typeparamref name="T"/>.</summary>
-    ICollection<T> Collection<T>(string name) where T : class;
+    IStoreCollection<T> Collection<T>(string name) where T : class;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -112,13 +112,13 @@ public sealed class InMemoryStore : IStore
 {
     private readonly ConcurrentDictionary<string, object> _cols = new();
 
-    public ICollection<T> Collection<T>(string name) where T : class =>
-        (ICollection<T>)_cols.GetOrAdd($"{name}:{typeof(T).FullName}", _ => new InMemoryCollection<T>());
+    public IStoreCollection<T> Collection<T>(string name) where T : class =>
+        (IStoreCollection<T>)_cols.GetOrAdd($"{name}:{typeof(T).FullName}", _ => new InMemoryCollection<T>());
 
     public void Dispose() => _cols.Clear();
 }
 
-internal sealed class InMemoryCollection<T> : ICollection<T> where T : class
+internal sealed class InMemoryCollection<T> : IStoreCollection<T> where T : class
 {
     private readonly ConcurrentDictionary<string, (T Doc, float[]? Emb)> _data = new();
 

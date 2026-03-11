@@ -3,7 +3,7 @@ using System.Runtime.CompilerServices;
 using System.Text.Json;
 using Npgsql;
 
-namespace Agentic;
+namespace Agentic.Storage;
 
 // ═══════════════════════════════════════════════════════════════════════════
 //  PostgresStore
@@ -22,8 +22,8 @@ public sealed class PostgresStore : IStore
 
     public PostgresStore(string connectionString) => _cs = connectionString;
 
-    public ICollection<T> Collection<T>(string name) where T : class =>
-        (ICollection<T>)_cols.GetOrAdd($"{name}:{typeof(T).FullName}", _ => new PostgresCollection<T>(name, this));
+    public IStoreCollection<T> Collection<T>(string name) where T : class =>
+        (IStoreCollection<T>)_cols.GetOrAdd($"{name}:{typeof(T).FullName}", _ => new PostgresCollection<T>(name, this));
 
     internal NpgsqlConnection Open()
     {
@@ -35,7 +35,7 @@ public sealed class PostgresStore : IStore
     public void Dispose() => _cols.Clear();
 }
 
-internal sealed class PostgresCollection<T>(string name, PostgresStore store) : ICollection<T>
+internal sealed class PostgresCollection<T>(string name, PostgresStore store) : IStoreCollection<T>
     where T : class
 {
     private readonly string _table = SanitizeName(name);

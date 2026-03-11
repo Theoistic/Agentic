@@ -1,6 +1,7 @@
 ﻿using Agentic;
 using Agentic.Cli;
 using Agentic.Mcp;
+using Agentic.Storage;
 
 Console.OutputEncoding = System.Text.Encoding.UTF8;
 

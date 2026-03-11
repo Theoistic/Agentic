@@ -1,4 +1,7 @@
-namespace Agentic;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+
+namespace Agentic.Storage;
 
 // ═══════════════════════════════════════════════════════════════════════════
 //  DI registration

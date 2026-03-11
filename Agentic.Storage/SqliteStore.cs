@@ -2,7 +2,7 @@ using System.Runtime.CompilerServices;
 using System.Text.Json;
 using Microsoft.Data.Sqlite;
 
-namespace Agentic;
+namespace Agentic.Storage;
 
 // ═══════════════════════════════════════════════════════════════════════════
 //  SqliteStore
@@ -31,7 +31,7 @@ public sealed class SqliteStore : IStore
         }
     }
 
-    public ICollection<T> Collection<T>(string name) where T : class =>
+    public IStoreCollection<T> Collection<T>(string name) where T : class =>
         new SqliteCollection<T>(name, this);
 
     internal ScopedConnection Open()
@@ -65,7 +65,7 @@ internal readonly struct ScopedConnection(SqliteConnection conn, bool owned) : I
     public void Dispose() { if (owned) conn.Dispose(); }
 }
 
-internal sealed class SqliteCollection<T>(string name, SqliteStore store) : ICollection<T>
+internal sealed class SqliteCollection<T>(string name, SqliteStore store) : IStoreCollection<T>
     where T : class
 {
     private readonly string _table = SanitizeName(name);

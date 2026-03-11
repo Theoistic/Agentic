@@ -3,5 +3,6 @@
   <Project Path="Agentic.MCP/Agentic.MCP.csproj" Id="b8aea829-77b1-47e0-ad27-50418ec19fb3" />
   <Project Path="Agentic.Runtime.WebServer/Agentic.Runtime.WebServer.csproj" />
   <Project Path="Agentic.Runtime/Agentic.Runtime.csproj" />
+  <Project Path="Agentic.Storage/Agentic.Storage.csproj" Id="809f4f9b-f240-450a-b9a6-8932d3fb1fe3" />
   <Project Path="Agentic/Agentic.csproj" />
 </Solution>
