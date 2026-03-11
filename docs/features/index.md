@@ -13,6 +13,7 @@ Agentic is built around a set of composable features. Each feature is independen
 | [`ILLMBackend`](lm-client#illmbackend) | Unified abstraction over any inference source; swap backends without touching agent code |
 | [`OpenAIBackend`](lm-client) | OpenAI-compatible REST client with streaming, embeddings, vision and health-check |
 | [`NativeBackend`](native-backend) | Local llama.cpp inference with auto-install from GitHub releases |
+| [`BackendRouter`](backend-router) | Compose multiple backends; route chat by model name, embeddings to a dedicated model |
 | [`LlamaRuntimeInstaller`](native-backend#llamaruntimeinstaller) | On-demand runtime installer for CPU, CUDA and Vulkan on Windows and Linux |
 | [Agent](agent) | Multi-turn streaming agent with automatic MCP tool orchestration |
 | [Image Input](image-input) | Send images alongside text as URL, local file, or base64 |

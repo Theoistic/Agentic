@@ -208,3 +208,34 @@ var agent = new Agent(lm, new AgentOptions
 
 await agent.ChatStreamAsync("Explain the Pythagorean theorem.");
 ```
+
+---
+
+## Dual-model setup with `BackendRouter`
+
+A common local pattern is to pair a large model for chat and reasoning with a small specialised model for vector embeddings. [`BackendRouter`](backend-router) wires them together as a single `ILLMBackend`:
+
+```csharp
+var chatOptions = new Mantle.LmSessionOptions
+{
+    ModelPath     = @"/models/qwen3.5-9b-q4.gguf",
+    ContextTokens = 8192,
+    MaxToolRounds = 32,
+};
+
+var embedOptions = new Mantle.LmSessionOptions
+{
+    ModelPath     = @"/models/embeddinggemma-300m-qat-q4.gguf",
+    ContextTokens = 2048,
+    BatchTokens   = 512,
+};
+
+await using var chatBackend  = new NativeBackend(chatOptions,  LlamaBackend.Cuda);
+await using var embedBackend = new NativeBackend(embedOptions, LlamaBackend.Cuda);
+
+await using var lm = new BackendRouter()
+    .Add("qwen-9b",    chatBackend,  isDefault: true)
+    .Add("embed-300m", embedBackend, isEmbedding: true);
+```
+
+All `RespondAsync` / `RespondStreamingAsync` calls go to the chat model; all `EmbedAsync` / `EmbedBatchAsync` calls go to the embedding model. See [BackendRouter](backend-router) for full routing rules and multi-model examples.

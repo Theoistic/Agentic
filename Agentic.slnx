@@ -4,5 +4,6 @@
   <Project Path="Agentic.Runtime/Agentic.Runtime.csproj" />
   <Project Path="Agentic.Shared/Agentic.Shared.csproj" Id="ff01451e-e2f7-4d43-af11-03803c4a1d75" />
   <Project Path="Agentic.Storage/Agentic.Storage.csproj" Id="809f4f9b-f240-450a-b9a6-8932d3fb1fe3" />
+  <Project Path="Agentic.Tests/Agentic.Tests.csproj" Id="0b7f0d75-a688-422a-a7ca-b05eea682927" />
   <Project Path="Agentic/Agentic.csproj" />
 </Solution>

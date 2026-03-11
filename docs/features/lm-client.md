@@ -37,6 +37,8 @@ public interface ILLMBackend
 
 Implement this interface to add your own backend (Ollama proxy, Anthropic wrapper, test stub, etc.) and pass it straight to `Agent`.
 
+To combine multiple `ILLMBackend` implementations — for example a large chat model alongside a small embedding model — see [`BackendRouter`](backend-router).
+
 ---
 
 ## `OpenAIBackend`

@@ -63,8 +63,4 @@
 		</ItemGroup>
 	</Target>
 
-	<ItemGroup>
-		<Folder Include="Context\" />
-	</ItemGroup>
-
 </Project>
