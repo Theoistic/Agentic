@@ -38,10 +38,6 @@
 	</ItemGroup>
 
 	<ItemGroup>
-		<ProjectReference Include="..\Agentic.Runtime\Agentic.Runtime.csproj" />
-	</ItemGroup>
-
-	<ItemGroup>
 		<None Include="..\README.md" Pack="true" PackagePath="\" />
 	</ItemGroup>
 
@@ -53,6 +49,7 @@
 
 	<ItemGroup>
 	  <ProjectReference Include="..\Agentic.Storage\Agentic.Storage.csproj" />
+    <ProjectReference Include="..\Agentic.Runtime\Agentic.Runtime.csproj" />
 	</ItemGroup>
 
 	<ItemGroup>
