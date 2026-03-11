@@ -20,7 +20,7 @@ var config = new LMConfig {
     Endpoint       = "http://127.0.0.1:1234"
 };
 
-using var lm  = new LM(config);
+using var lm  = new OpenAIBackend(config);
 var app       = builder.Build();
 app.UseStaticFiles();
 app.MapMcpServer("/mcp");

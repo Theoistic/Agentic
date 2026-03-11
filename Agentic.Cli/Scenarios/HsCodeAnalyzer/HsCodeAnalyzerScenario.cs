@@ -76,7 +76,7 @@ public class TollInvoiceDbContext : DbContext
 
 // ── Tools ─────────────────────────────────────────────────────────────────
 
-public class HsCodeAnalyzerTools(LM lm, IStoreCollection<HSDescription> hs, TollInvoiceDbContext db) : IDisposableToolSet
+public class HsCodeAnalyzerTools(ILLMBackend lm, IStoreCollection<HSDescription> hs, TollInvoiceDbContext db) : IDisposableToolSet
 {
     private const string DataFile  = "taks_records.json";
     private const int    BatchSize = 50;
@@ -439,7 +439,7 @@ public sealed class HsCodeAnalyzerScenario : IScenario
 
     public string Name => "HS Code Analyzer";
 
-    public async Task RunAsync(LM lm, IServiceProvider services, string mcpUrl)
+    public async Task RunAsync(ILLMBackend lm, IServiceProvider services, string mcpUrl)
     {
         var toolRegistry = services.GetRequiredService<ToolRegistry>();
         var store        = services.GetRequiredService<IStore>();

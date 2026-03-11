@@ -15,7 +15,7 @@ namespace Agentic;
 /// </summary>
 public sealed class Agent : IAsyncDisposable
 {
-    private readonly LM _lm;
+    private readonly ILLMBackend _lm;
     private string? _lastResponseId;
 
     /// <summary>The tool registry used by this agent. Pre-populated tools are sent to MCP servers.</summary>
@@ -28,12 +28,12 @@ public sealed class Agent : IAsyncDisposable
     /// <summary>Initialises a new agent with its own internal <see cref="ToolRegistry"/>.</summary>
     /// <param name="lm">The LM client used for all API calls.</param>
     /// <param name="options">Agent options; a default instance is used when <c>null</c>.</param>
-    public Agent(LM lm, AgentOptions? options = null) { _lm = lm; Tools = new(); Options = options ?? new(); Context = Options.Compaction is not null ? new ContextManager(Options.Compaction) : null; }
+    public Agent(ILLMBackend lm, AgentOptions? options = null) { _lm = lm; Tools = new(); Options = options ?? new(); Context = Options.Compaction is not null ? new ContextManager(Options.Compaction) : null; }
     /// <summary>Initialises a new agent with a shared <see cref="ToolRegistry"/>.</summary>
     /// <param name="lm">The LM client used for all API calls.</param>
     /// <param name="tools">A shared tool registry (e.g. injected via DI).</param>
     /// <param name="options">Agent options; a default instance is used when <c>null</c>.</param>
-    public Agent(LM lm, ToolRegistry tools, AgentOptions? options = null) { _lm = lm; Tools = tools; Options = options ?? new(); Context = Options.Compaction is not null ? new ContextManager(Options.Compaction) : null; }
+    public Agent(ILLMBackend lm, ToolRegistry tools, AgentOptions? options = null) { _lm = lm; Tools = tools; Options = options ?? new(); Context = Options.Compaction is not null ? new ContextManager(Options.Compaction) : null; }
 
     /// <summary>Registers a tool set and returns this agent for fluent chaining.</summary>
     /// <typeparam name="T">The tool set type.</typeparam>

@@ -218,7 +218,7 @@ public sealed class ContextManager
     /// Keeps the most recent <see cref="CompactionOptions.HotTailTurns"/> verbatim.
     /// Uses the LM to generate the summary — this makes an additional API call.
     /// </summary>
-    public async Task<Checkpoint?> CompactAsync(LM lm, CompactionLevel? level = null,
+    public async Task<Checkpoint?> CompactAsync(ILLMBackend lm, CompactionLevel? level = null,
         int? targetTokens = null, CancellationToken ct = default)
     {
         var effectiveLevel = level ?? Options.DefaultLevel;

@@ -11,5 +11,5 @@ public interface IScenario
     string Name { get; }
 
     /// <summary>Configure tools, create the agent, and start the REPL.</summary>
-    Task RunAsync(LM lm, IServiceProvider services, string mcpUrl);
+    Task RunAsync(ILLMBackend lm, IServiceProvider services, string mcpUrl);
 }

@@ -6,7 +6,7 @@ namespace Agentic;
 /// Built-in tool set that exposes embedding and cosine-similarity operations to the agent.
 /// Register with <c>toolRegistry.Register(new EmbeddingTools(lm))</c>.
 /// </summary>
-public class EmbeddingTools(LM lm) : IAgentToolSet {
+public class EmbeddingTools(ILLMBackend lm) : IAgentToolSet {
     [Tool, Description("Generate an embedding vector for a text string. Returns the vector dimensions and a preview of the first values.")]
     public async Task<string> Embed(
         [ToolParam("The text to embed")] string text) {

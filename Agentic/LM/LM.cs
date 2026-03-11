@@ -9,7 +9,7 @@ namespace Agentic;
 //  Configuration
 // ═══════════════════════════════════════════════════════════════════════════
 
-/// <summary>Configuration for an <see cref="LM"/> client instance.</summary>
+/// <summary>Configuration for an <see cref="OpenAIBackend"/> instance.</summary>
 public class LMConfig
 {
     /// <summary>Model identifier sent in every request (e.g. <c>"gpt-4o"</c>).</summary>
@@ -18,7 +18,7 @@ public class LMConfig
     public string Endpoint { get; set; } = "http://localhost:5454";
     /// <summary>Optional Bearer token sent in the <c>Authorization</c> header.</summary>
     public string ApiKey { get; set; } = "";
-    /// <summary>Model identifier used for embedding requests. Required when calling <see cref="LM.EmbedAsync"/> or <see cref="LM.EmbedBatchAsync"/>.</summary>
+    /// <summary>Model identifier used for embedding requests. Required when calling <see cref="OpenAIBackend.EmbedAsync"/> or <see cref="OpenAIBackend.EmbedBatchAsync"/>.</summary>
     public string? EmbeddingModel { get; set; }
     /// <summary>
     /// Default reasoning effort applied to every <c>/v1/responses</c> call.
@@ -34,7 +34,7 @@ public class LMConfig
     public InferenceConfig? Inference { get; set; }
     /// <summary>
     /// Named model aliases. Map a short key (e.g. <c>"advanced"</c>, <c>"ocr"</c>) to the full
-    /// model identifier sent to the server. Resolved by <see cref="LM.ResolveModel"/>.
+    /// model identifier sent to the server. Resolved by <see cref="OpenAIBackend.ResolveModel"/>.
     /// </summary>
     public Dictionary<string, string> Models { get; set; } = [];
 }
@@ -56,10 +56,10 @@ public sealed class LMException(string message, int statusCode, string? body) : 
 }
 
 /// <summary>
-/// OpenAI-compatible REST client supporting <c>/v1/responses</c> (streaming + non-streaming)
+/// OpenAI-compatible backend supporting <c>/v1/responses</c> (streaming + non-streaming)
 /// and <c>/v1/embeddings</c>.
 /// </summary>
-public sealed class LM : IDisposable
+public sealed class OpenAIBackend : ILLMBackend, IDisposable
 {
     private readonly HttpClient _http;
     private readonly LMConfig _config;
@@ -71,10 +71,10 @@ public sealed class LM : IDisposable
         PropertyNameCaseInsensitive = true,
     };
 
-    /// <summary>Initialises a new LM client.</summary>
+    /// <summary>Initialises a new OpenAI-compatible backend.</summary>
     /// <param name="config">Connection and model configuration.</param>
     /// <param name="httpClient">Optional shared <see cref="HttpClient"/>; when <c>null</c> a new instance is created and owned by this class.</param>
-    public LM(LMConfig config, HttpClient? httpClient = null)
+    public OpenAIBackend(LMConfig config, HttpClient? httpClient = null)
     {
         ArgumentNullException.ThrowIfNull(config);
         _config = config;
