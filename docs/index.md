@@ -27,7 +27,10 @@ Agentic is a lightweight .NET library for building LLM-powered agents with strea
 
 | Feature | Description |
 |---------|-------------|
-| [LM Client](features/lm-client) | OpenAI-compatible REST client with streaming, embeddings, vision and health-check |
+| [`ILLMBackend`](features/lm-client#illmbackend) | Unified abstraction over any inference source; swap backends without touching agent code |
+| [`OpenAIBackend`](features/lm-client) | OpenAI-compatible REST client with streaming, embeddings, vision and health-check |
+| [`NativeBackend`](features/native-backend) | Local llama.cpp inference with auto-install from GitHub releases |
+| [`LlamaRuntimeInstaller`](features/native-backend#llamaruntimeinstaller) | On-demand runtime installer for CPU, CUDA and Vulkan on Windows and Linux |
 | [Agent](features/agent) | Multi-turn streaming agent with automatic MCP tool orchestration |
 | [Image Input](features/image-input) | Send images alongside text as URL, local file, or base64 |
 | [Workflows](features/workflows) | Ordered multi-step execution with per-step async guardrails and retry |
@@ -42,7 +45,7 @@ Agentic is a lightweight .NET library for building LLM-powered agents with strea
 ## Installation
 
 ```
-dotnet add package Agentic
+dotnet add package Theoistic.Agentic
 ```
 
 > **Requirements:** .NET 10 · ASP.NET Core (included via `Microsoft.AspNetCore.App` framework reference)
@@ -52,8 +55,8 @@ dotnet add package Agentic
 ```csharp
 using Agentic;
 
-// 1. Create the LM client
-var lm = new LM(new LMConfig
+// 1. Connect to any OpenAI-compatible endpoint
+var lm = new OpenAIBackend(new LMConfig
 {
     Endpoint  = "http://localhost:1234",
     ModelName = "your-model-name",

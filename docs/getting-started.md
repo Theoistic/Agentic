@@ -19,24 +19,29 @@ nav_order: 2
 Add the NuGet package to your project:
 
 ```
-dotnet add package Agentic
+dotnet add package Theoistic.Agentic
 ```
 
 > **Requirements:** .NET 10 · ASP.NET Core (included via `Microsoft.AspNetCore.App` framework reference)
 
 ---
 
-## Step 1 — Create an LM client
+## Step 1 — Choose a backend
 
-The `LM` class is your connection to any OpenAI-compatible language model server.
+Agentic uses the `ILLMBackend` abstraction so you can swap between a remote OpenAI-compatible API and a locally-running llama.cpp model without changing any agent code.
+
+### Remote API (`OpenAIBackend`)
+
+Connects to LM Studio, OpenRouter, OpenAI, or any OpenAI-compatible `/v1/responses` endpoint:
 
 ```csharp
 using Agentic;
 
-var lm = new LM(new LMConfig
+var lm = new OpenAIBackend(new LMConfig
 {
     Endpoint       = "http://localhost:1234",   // LM Studio or any OpenAI-compatible server
     ModelName      = "your-model-name",
+    ApiKey         = "sk-...",                  // optional Bearer token
     EmbeddingModel = "your-embedding-model",    // optional — needed for vector storage
 });
 ```
@@ -46,6 +51,30 @@ Compatible with:
 - [Ollama](https://ollama.com/) (via OpenAI-compatible endpoint)
 - [OpenAI API](https://platform.openai.com/)
 - Any OpenAI-compatible REST API (`/v1/responses`)
+
+### Local inference (`NativeBackend`)
+
+Runs inference locally using llama.cpp. The runtime is downloaded and installed automatically on first use:
+
+```csharp
+using Agentic;
+using Agentic.Runtime.Core;
+
+var sessionOptions = new Mantle.LmSessionOptions
+{
+    ModelPath    = @"/path/to/model.gguf",
+    ToolRegistry = new Mantle.ToolRegistry(),
+    Compaction   = new Mantle.ConversationCompactionOptions(MaxInputTokens: 4096),
+};
+
+await using var lm = new NativeBackend(
+    sessionOptions,
+    backend:         LlamaBackend.Cuda,
+    cudaVersion:     "12.4",
+    installProgress: new Progress<(string msg, double pct)>(p => Console.Write($"\r[{p.pct:F0}%] {p.msg}")));
+```
+
+See [NativeBackend](features/native-backend) for full details including CPU, CUDA, and Vulkan options.
 
 ---
 
@@ -122,7 +151,8 @@ The MCP server exposes all registered tools over SSE + JSON-RPC so any MCP-compa
 
 Explore the individual feature documentation or jump straight into examples:
 
-- [LM Client](features/lm-client) — configuration options and direct API calls
+- [OpenAI Backend](features/lm-client) — configuration options and direct API calls
+- [Native Backend](features/native-backend) — local llama.cpp inference with auto-install
 - [Agent](features/agent) — multi-turn chat, events, and options
 - [Workflows](features/workflows) — multi-step agent pipelines
 - [Tool System](features/tools) — building tools with attributes
