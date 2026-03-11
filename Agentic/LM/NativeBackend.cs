@@ -1,5 +1,6 @@
 using System.Runtime.CompilerServices;
 using System.Text.Json;
+using Agentic.Runtime.Core;
 using Mantle = Agentic.Runtime.Mantle;
 
 namespace Agentic;
@@ -9,10 +10,16 @@ namespace Agentic;
 /// </summary>
 public sealed class NativeBackend : ILLMBackend, IAsyncDisposable, IDisposable
 {
-    private readonly Mantle.LmSessionOptions _sessionOptions;
+    private Mantle.LmSessionOptions _sessionOptions;
     private readonly string _defaultModel;
     private readonly SemaphoreSlim _sessionLock = new(1, 1);
     private readonly HashSet<string> _projectedLocalToolNames = new(StringComparer.Ordinal);
+
+    private readonly LlamaBackend? _autoBackend;
+    private readonly string? _autoCudaVersion;
+    private readonly string? _autoReleaseTag;
+    private readonly string? _autoInstallRoot;
+    private readonly IProgress<(string message, double percent)>? _installProgress;
 
     private Mantle.LmSession? _session;
     private bool _disposed;
@@ -28,6 +35,42 @@ public sealed class NativeBackend : ILLMBackend, IAsyncDisposable, IDisposable
             ? Path.GetFileNameWithoutExtension(sessionOptions.ModelPath) ?? "model"
             : modelName;
     }
+
+    /// <summary>
+    /// Creates a native backend that automatically downloads and installs the llama.cpp runtime
+    /// from the latest GitHub release when no local installation is found, then lazily initializes
+    /// the session on first use.
+    /// </summary>
+    /// <param name="sessionOptions">Session options without <c>BackendDirectory</c> — it is resolved automatically.</param>
+    /// <param name="backend">The accelerator backend to use.</param>
+    /// <param name="cudaVersion">Preferred CUDA version, e.g. <c>"12.4"</c>. When <see langword="null"/> the highest available version is chosen.</param>
+    /// <param name="releaseTag">Pin to a specific release tag, e.g. <c>"b8269"</c>. When <see langword="null"/> the latest release is used.</param>
+    /// <param name="installRoot">Override the default runtime install root directory.</param>
+    /// <param name="installProgress">Optional progress reporter for the download and extraction.</param>
+    /// <param name="modelName">Optional model name override.</param>
+    public NativeBackend(
+        Mantle.LmSessionOptions sessionOptions,
+        LlamaBackend backend,
+        string? cudaVersion = null,
+        string? releaseTag = null,
+        string? installRoot = null,
+        IProgress<(string message, double percent)>? installProgress = null,
+        string? modelName = null)
+        : this(sessionOptions, modelName)
+    {
+        _autoBackend = backend;
+        _autoCudaVersion = cudaVersion;
+        _autoReleaseTag = releaseTag;
+        _autoInstallRoot = installRoot;
+        _installProgress = installProgress;
+    }
+
+    /// <summary>
+    /// Gets the resolved backend directory after the session has been initialized,
+    /// or <see langword="null"/> if the runtime has not been loaded yet.
+    /// </summary>
+    public string? BackendDirectory =>
+        string.IsNullOrEmpty(_sessionOptions.BackendDirectory) ? null : _sessionOptions.BackendDirectory;
 
     public Task<ResponseResponse> RespondAsync(
         string input, string? instructions = null, string? previousResponseId = null,
@@ -169,7 +212,24 @@ public sealed class NativeBackend : ILLMBackend, IAsyncDisposable, IDisposable
         await _sessionLock.WaitAsync(ct);
         try
         {
-            _session ??= await Mantle.LmSession.CreateAsync(_sessionOptions, ct);
+            if (_session is null)
+            {
+                if (_autoBackend.HasValue && string.IsNullOrEmpty(_sessionOptions.BackendDirectory))
+                {
+                    string dir = await LlamaRuntimeInstaller.EnsureInstalledAsync(
+                        _autoBackend.Value,
+                        cudaVersion: _autoCudaVersion,
+                        releaseTag: _autoReleaseTag,
+                        installRoot: _autoInstallRoot,
+                        progress: _installProgress,
+                        ct: ct);
+
+                    _sessionOptions = _sessionOptions with { BackendDirectory = dir };
+                }
+
+                _session = await Mantle.LmSession.CreateAsync(_sessionOptions, ct);
+            }
+
             return _session;
         }
         finally

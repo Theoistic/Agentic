@@ -1,10 +1,13 @@
 ﻿using Agentic.Runtime;
+using Agentic.Runtime.Core;
 using Mantle = Agentic.Runtime.Mantle;
 
-const string backendDirectory = @"C:\Users\Theo\Downloads\llama-b8265-bin-win-cuda-12.4-x64";
 const string modelPath = @"C:\Users\Theo\.lmstudio\models\lmstudio-community\Qwen3.5-9B-GGUF\Qwen3.5-9B-Q4_K_M.gguf";
 
 Mantle.IChatRenderer renderer = new Mantle.ConsoleChatRenderer(Console.Out);
+
+var installProgress = new Progress<(string message, double percent)>(
+    p => Console.Write($"\r  [{p.percent:F0,3}%] {p.message,-60}"));
 
 await using var agent = await new Agent()
     .Named("Challenge Runner")
@@ -19,7 +22,8 @@ await using var agent = await new Agent()
     .WithContext("environment", "local console demo")
     .WithContext("challenge_mode", true)
     .WithContext("minimum_expected_tool_calls", 100)
-    .UseModel(backendDirectory, modelPath)
+    .UseModel(modelPath, LlamaBackend.Cuda, cudaVersion: "12.4")
+    .WithInstallProgress(installProgress)
     .WithLogger(Mantle.NullLogger.Instance)
     .WithCompaction(new Mantle.ConversationCompactionOptions(
         MaxInputTokens: 16384,

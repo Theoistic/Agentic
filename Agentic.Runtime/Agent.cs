@@ -81,6 +81,12 @@ public sealed class Agent : IAsyncDisposable, IDisposable
     private AgentTaskStatus _status = AgentTaskStatus.Created;
     private bool _disposed;
 
+    // Auto-backend resolution
+    private Core.LlamaBackend? _autoBackend;
+    private string? _autoCudaVersion;
+    private string? _autoInstallRoot;
+    private IProgress<(string message, double percent)>? _installProgress;
+
     /// <summary>
     /// Raised whenever the agent status changes.
     /// </summary>
@@ -206,7 +212,44 @@ public sealed class Agent : IAsyncDisposable, IDisposable
         _backendDirectory = backendDirectory;
         _modelPath = modelPath;
         _modelId = modelId;
+        _autoBackend = null;
+        _autoCudaVersion = null;
+        _autoInstallRoot = null;
         InvalidateSession();
+        return this;
+    }
+
+    /// <summary>
+    /// Configures the model path and instructs the agent to automatically download and install
+    /// the llama.cpp runtime from the latest GitHub release when no local installation is found.
+    /// </summary>
+    /// <param name="modelPath">Path to the GGUF model file.</param>
+    /// <param name="backend">The accelerator backend to use.</param>
+    /// <param name="cudaVersion">
+    /// Preferred CUDA version, e.g. <c>"12.4"</c>. When <see langword="null"/> the
+    /// highest available CUDA 12.x asset is chosen automatically.
+    /// </param>
+    /// <param name="installRoot">Override the default runtime install root directory.</param>
+    /// <param name="modelId">Optional model identifier override.</param>
+    public Agent UseModel(string modelPath, Core.LlamaBackend backend, string? cudaVersion = null, string? installRoot = null, string? modelId = null)
+    {
+        _backendDirectory = null;
+        _modelPath = modelPath;
+        _modelId = modelId;
+        _autoBackend = backend;
+        _autoCudaVersion = cudaVersion;
+        _autoInstallRoot = installRoot;
+        InvalidateSession();
+        return this;
+    }
+
+    /// <summary>
+    /// Configures a progress handler that receives status updates while the llama.cpp
+    /// runtime is being downloaded and installed.
+    /// </summary>
+    public Agent WithInstallProgress(IProgress<(string message, double percent)>? progress)
+    {
+        _installProgress = progress;
         return this;
     }
 
@@ -487,6 +530,16 @@ public sealed class Agent : IAsyncDisposable, IDisposable
     {
         if (_session is not null)
             return;
+
+        if (_autoBackend.HasValue && string.IsNullOrWhiteSpace(_backendDirectory))
+        {
+            _backendDirectory = await Core.LlamaRuntimeInstaller.EnsureInstalledAsync(
+                _autoBackend.Value,
+                cudaVersion: _autoCudaVersion,
+                installRoot: _autoInstallRoot,
+                progress: _installProgress,
+                ct: ct);
+        }
 
         ValidateConfiguration();
 

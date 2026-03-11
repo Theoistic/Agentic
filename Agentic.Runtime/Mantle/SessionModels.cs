@@ -349,8 +349,9 @@ public sealed record LmSessionOptions
 {
     /// <summary>
     /// Directory containing the llama.cpp backend binaries to load.
+    /// Omit when using the auto-install constructor overload on <see cref="NativeBackend"/>.
     /// </summary>
-    public required string BackendDirectory { get; init; }
+    public string BackendDirectory { get; init; } = string.Empty;
 
     /// <summary>
     /// Full path to the GGUF model file.
