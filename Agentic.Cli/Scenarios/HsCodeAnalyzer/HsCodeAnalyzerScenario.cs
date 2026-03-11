@@ -441,21 +441,19 @@ public sealed class HsCodeAnalyzerScenario : IScenario
 
     public async Task RunAsync(ILLMBackend lm, IServiceProvider services, string? mcpUrl = null)
     {
-        var toolRegistry = services.GetRequiredService<ToolRegistry>();
         var store        = services.GetRequiredService<IStore>();
         await using var db = new TollInvoiceDbContext();
-
-        toolRegistry.Register(new HsCodeAnalyzerTools(lm, store.Collection<HSDescription>("hscodes"), db));
-
-        ConsoleHelper.WriteDim($"Tools: {string.Join(", ", toolRegistry.GetAllDescriptors().Select(d => d.Name))}");
-        Console.WriteLine();
-
-        var agent = new Agent(lm, new AgentOptions
+        await using var agent = new Agent(lm, new AgentOptions
         {
             SystemPrompt = SystemPrompt,
             Compaction   = new CompactionOptions(),
             Reasoning    = ReasoningEffort.None,
         });
+
+        agent.RegisterTools(new HsCodeAnalyzerTools(lm, store.Collection<HSDescription>("hscodes"), db));
+
+        ConsoleHelper.WriteDim($"Tools: {string.Join(", ", agent.Tools.GetAllDescriptors().Select(d => d.Name))}");
+        Console.WriteLine();
 
         await new AgenticRepl(agent, mcpUrl).RunAsync();
     }

@@ -1,6 +1,7 @@
 ﻿using Agentic;
 using Agentic.Cli;
 using Microsoft.Extensions.DependencyInjection;
+using Agentic.Storage;
 using Mantle = Agentic.Runtime.Mantle;
 
 Console.OutputEncoding = System.Text.Encoding.UTF8;
@@ -41,8 +42,10 @@ var sessionOptions = new Mantle.LmSessionOptions
 
 await using var lm = new NativeBackend(sessionOptions, Path.GetFileNameWithoutExtension(modelPath));
 
-IScenario scenario = new NativeLocalToolsScenario();
-using var services = new ServiceCollection().BuildServiceProvider();
+IScenario scenario = new HsCodeAnalyzerScenario();
+using var services = new ServiceCollection()
+    .AddStore()
+    .BuildServiceProvider();
 
 ConsoleHelper.PrintBanner($"Agentic CLI  ·  {scenario.Name}  ·  {Path.GetFileName(modelPath)}");
 Console.WriteLine();
