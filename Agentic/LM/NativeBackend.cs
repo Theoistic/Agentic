@@ -189,6 +189,7 @@ public sealed class NativeBackend : ILLMBackend, IAsyncDisposable, IDisposable
         bool stream)
     {
         ValidateUnsupportedFeatures(input);
+        var hasVisionInput = ContainsVisionInput(input);
         SynchronizeLocalTools(tools);
 
         return new Mantle.ResponseRequest
@@ -204,6 +205,7 @@ public sealed class NativeBackend : ILLMBackend, IAsyncDisposable, IDisposable
             TopK = inference?.TopK,
             PresencePenalty = inference?.PresencePenalty is double presencePenalty ? (float)presencePenalty : null,
             RepetitionPenalty = inference?.RepetitionPenalty is double repetitionPenalty ? (float)repetitionPenalty : null,
+            AddVisionId = hasVisionInput,
             EnableThinking = reasoning switch
             {
                 null => null,
@@ -222,11 +224,14 @@ public sealed class NativeBackend : ILLMBackend, IAsyncDisposable, IDisposable
     private static void ValidateUnsupportedFeatures(IEnumerable<ResponseInput> input)
     {
         foreach (var item in input)
-        {
-            if (item.Content is IEnumerable<ResponseInputContent> parts && parts.OfType<InputImageContent>().Any())
-                throw new NotSupportedException("NativeBackend does not support image inputs through the response adapter.");
-        }
+            if (item.Content is IEnumerable<ResponseInputContent> parts)
+                foreach (var image in parts.OfType<InputImageContent>())
+                    if (string.IsNullOrWhiteSpace(image.ImageUrl))
+                        throw new NotSupportedException("NativeBackend image inputs must provide a non-empty image URL or data URL.");
     }
+
+    private static bool ContainsVisionInput(IEnumerable<ResponseInput> input) =>
+        input.Any(item => item.Content is IEnumerable<ResponseInputContent> parts && parts.OfType<InputImageContent>().Any());
 
     private void SynchronizeLocalTools(List<ToolDefinition>? tools)
     {
@@ -307,20 +312,45 @@ public sealed class NativeBackend : ILLMBackend, IAsyncDisposable, IDisposable
 
         foreach (var message in input)
         {
-            string text = message.Content switch
-            {
-                string s => s,
-                IEnumerable<ResponseInputContent> parts => string.Concat(parts.OfType<InputTextContent>().Select(part => part.Text)),
-                _ => message.Content?.ToString() ?? string.Empty,
-            };
-
             items.Add(new Mantle.ResponseMessageItem(
                 Id: Mantle.SessionIds.Create("item"),
                 Role: message.Role,
-                Content: [new Mantle.ResponseTextContent("input_text", text)]));
+                Content: ConvertMessageContent(message.Content)));
         }
 
         return items;
+    }
+
+    private static IReadOnlyList<Mantle.ResponseTextContent> ConvertMessageContent(object? content)
+    {
+        return content switch
+        {
+            string text => [new Mantle.ResponseTextContent("input_text", text)],
+            IEnumerable<ResponseInputContent> parts => ConvertMessageContent(parts),
+            _ => [new Mantle.ResponseTextContent("input_text", content?.ToString() ?? string.Empty)],
+        };
+    }
+
+    private static IReadOnlyList<Mantle.ResponseTextContent> ConvertMessageContent(IEnumerable<ResponseInputContent> parts)
+    {
+        var content = new List<Mantle.ResponseTextContent>();
+
+        foreach (var part in parts)
+        {
+            switch (part)
+            {
+                case InputTextContent text:
+                    content.Add(new Mantle.ResponseTextContent("input_text", text.Text));
+                    break;
+                case InputImageContent image when !string.IsNullOrWhiteSpace(image.ImageUrl):
+                    content.Add(new Mantle.ResponseTextContent("input_image", image.ImageUrl));
+                    break;
+            }
+        }
+
+        return content.Count > 0
+            ? content
+            : [new Mantle.ResponseTextContent("input_text", string.Empty)];
     }
 
     private ResponseResponse MapResponse(Mantle.ResponseObject response)

@@ -554,9 +554,11 @@ public sealed class LmSession : IAsyncDisposable, IDisposable
         switch (item)
         {
             case ResponseMessageItem message:
+                var (content, parts) = ParseMessageContent(message.Content);
                 history.Add(new ChatMessage(
                     message.Role,
-                    Content: string.Concat(message.Content.Select(c => c.Text)),
+                    Content: content,
+                    Parts: parts,
                     ReasoningContent: message.Reasoning));
                 break;
 
@@ -617,6 +619,36 @@ public sealed class LmSession : IAsyncDisposable, IDisposable
         }
 
         return items;
+    }
+
+    private static (string? Content, IReadOnlyList<ContentPart>? Parts) ParseMessageContent(IReadOnlyList<ResponseTextContent> content)
+    {
+        if (content.Count == 0)
+            return (null, null);
+
+        var text = new StringBuilder();
+        var parts = new List<ContentPart>(content.Count);
+
+        foreach (var part in content)
+        {
+            switch (part.Type)
+            {
+                case "input_image":
+                    if (!string.IsNullOrWhiteSpace(part.Text))
+                        parts.Add(new ImagePart(part.Text));
+                    break;
+
+                default:
+                    if (!string.IsNullOrEmpty(part.Text))
+                    {
+                        text.Append(part.Text);
+                        parts.Add(new TextPart(part.Text));
+                    }
+                    break;
+            }
+        }
+
+        return (text.Length > 0 ? text.ToString() : null, parts.Count > 0 ? parts : null);
     }
 
     private static ResponseUsage SumUsage(IReadOnlyList<ChatMessage> messages)
