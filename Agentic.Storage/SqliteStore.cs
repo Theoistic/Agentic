@@ -110,8 +110,17 @@ internal sealed class SqliteCollection<T>(string name, SqliteStore store) : ISto
             await UpsertCoreAsync(id, doc, embedding, ct);
             return id;
         }
-        catch (Exception ex) { StorageTelemetry.OperationErrors.Add(1); StorageTelemetry.RecordException(activity, ex); throw; }
-        finally { StorageTelemetry.OperationDuration.Record(sw.Elapsed.TotalMilliseconds, new KeyValuePair<string, object?>("agentic.storage.operation", "insert")); }
+        catch (Exception ex)
+        {
+            StorageTelemetry.OperationErrors.Add(1);
+            StorageTelemetry.RecordException(activity, ex);
+            throw;
+        }
+        finally
+        {
+            StorageTelemetry.OperationDuration.Record(sw.Elapsed.TotalMilliseconds,
+                new KeyValuePair<string, object?>("agentic.storage.operation", "insert"));
+        }
     }
 
     public async Task UpsertAsync(string id, T doc, float[]? embedding = null, CancellationToken ct = default)
@@ -125,8 +134,17 @@ internal sealed class SqliteCollection<T>(string name, SqliteStore store) : ISto
             activity?.SetTag("agentic.storage.collection", _table);
             await UpsertCoreAsync(id, doc, embedding, ct);
         }
-        catch (Exception ex) { StorageTelemetry.OperationErrors.Add(1); StorageTelemetry.RecordException(activity, ex); throw; }
-        finally { StorageTelemetry.OperationDuration.Record(sw.Elapsed.TotalMilliseconds, new KeyValuePair<string, object?>("agentic.storage.operation", "upsert")); }
+        catch (Exception ex)
+        {
+            StorageTelemetry.OperationErrors.Add(1);
+            StorageTelemetry.RecordException(activity, ex);
+            throw;
+        }
+        finally
+        {
+            StorageTelemetry.OperationDuration.Record(sw.Elapsed.TotalMilliseconds,
+                new KeyValuePair<string, object?>("agentic.storage.operation", "upsert"));
+        }
     }
 
     private async Task UpsertCoreAsync(string id, T doc, float[]? embedding, CancellationToken ct)
@@ -229,7 +247,16 @@ internal sealed class SqliteCollection<T>(string name, SqliteStore store) : ISto
             activity?.SetTag("agentic.storage.results_count", results.Count);
             return results;
         }
-        catch (Exception ex) { StorageTelemetry.OperationErrors.Add(1); StorageTelemetry.RecordException(activity, ex); throw; }
-        finally { StorageTelemetry.OperationDuration.Record(sw.Elapsed.TotalMilliseconds, new KeyValuePair<string, object?>("agentic.storage.operation", "search")); }
+        catch (Exception ex)
+        {
+            StorageTelemetry.OperationErrors.Add(1);
+            StorageTelemetry.RecordException(activity, ex);
+            throw;
+        }
+        finally
+        {
+            StorageTelemetry.OperationDuration.Record(sw.Elapsed.TotalMilliseconds,
+                new KeyValuePair<string, object?>("agentic.storage.operation", "search"));
+        }
     }
 }

@@ -190,7 +190,16 @@ internal sealed class PostgresCollection<T>(string name, PostgresStore store) : 
             activity?.SetTag("agentic.storage.results_count", results.Count);
             return results;
         }
-        catch (Exception ex) { StorageTelemetry.OperationErrors.Add(1); StorageTelemetry.RecordException(activity, ex); throw; }
-        finally { StorageTelemetry.OperationDuration.Record(sw.Elapsed.TotalMilliseconds, new KeyValuePair<string, object?>("agentic.storage.operation", "search")); }
+        catch (Exception ex)
+        {
+            StorageTelemetry.OperationErrors.Add(1);
+            StorageTelemetry.RecordException(activity, ex);
+            throw;
+        }
+        finally
+        {
+            StorageTelemetry.OperationDuration.Record(sw.Elapsed.TotalMilliseconds,
+                new KeyValuePair<string, object?>("agentic.storage.operation", "search"));
+        }
     }
 }
