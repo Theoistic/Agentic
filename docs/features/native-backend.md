@@ -15,7 +15,7 @@ nav_order: 12
 
 ---
 
-`NativeBackend` runs inference locally through `Agentic.Runtime` (llama.cpp). It implements `ILLMBackend` so it is a drop-in replacement for `OpenAIBackend`. The session is initialised lazily on first use, and when constructed with a `LlamaBackend` the runtime binaries are downloaded and installed automatically if not already present.
+`NativeBackend` runs inference locally through `Agentic.Runtime` (llama.cpp). It implements `ILLMBackend` so it is a drop-in replacement for `OpenAIBackend`. The session is initialized lazily on first use, and when constructed with a `LlamaBackend` the runtime binaries are downloaded and installed automatically if not already present.
 
 ---
 
