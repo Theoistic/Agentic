@@ -58,8 +58,8 @@
 
 	<Target Name="BundleProjectReferencedAssemblies" BeforeTargets="_GetPackageFiles">
 		<ItemGroup>
-			<None Include="$(MSBuildProjectDirectory)\bin\$(Configuration)\$(TargetFramework)\Agentic.Storage.dll" Pack="true" PackagePath="lib/$(TargetFramework)/" />
-			<None Include="$(MSBuildProjectDirectory)\bin\$(Configuration)\$(TargetFramework)\Agentic.Runtime.dll" Pack="true" PackagePath="lib/$(TargetFramework)/" />
+			<None Include="$(OutputPath)Agentic.Storage.dll" Pack="true" PackagePath="lib/$(TargetFramework)/" />
+			<None Include="$(OutputPath)Agentic.Runtime.dll" Pack="true" PackagePath="lib/$(TargetFramework)/" />
 		</ItemGroup>
 	</Target>
 
