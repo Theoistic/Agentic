@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Diagnostics;
 using System.Reflection;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -127,17 +128,41 @@ public sealed class ToolRegistry
     /// <exception cref="KeyNotFoundException">Thrown when <paramref name="name"/> is not registered.</exception>
     public async Task<string> InvokeAsync(string name, JsonElement? arguments, ToolContext? context = null, CancellationToken ct = default)
     {
-        if (!_tools.TryGetValue(name, out var tool))
-            throw new KeyNotFoundException($"Tool '{name}' is not registered.");
-        var args = BindArguments(tool.Parameters, arguments, JsonOptions, context, ct);
-        var result = tool.Method.Invoke(tool.Instance, args);
-        if (result is Task task)
+        using var activity = AgenticTelemetry.StartActivity("tool.invoke");
+        AgenticTelemetry.ToolInvocations.Add(1, new KeyValuePair<string, object?>("agentic.tool.name", name));
+        var sw = Stopwatch.StartNew();
+        try
         {
-            await task;
-            var tt = task.GetType();
-            return tt.IsGenericType ? SerializeToolResult(tt.GetProperty("Result")!.GetValue(task), JsonOptions) : "";
+            activity?.SetTag("agentic.tool.name", name);
+            if (!_tools.TryGetValue(name, out var tool))
+                throw new KeyNotFoundException($"Tool '{name}' is not registered.");
+            var args = BindArguments(tool.Parameters, arguments, JsonOptions, context, ct);
+            var result = tool.Method.Invoke(tool.Instance, args);
+            string resultStr;
+            if (result is Task task)
+            {
+                await task;
+                var tt = task.GetType();
+                resultStr = tt.IsGenericType ? SerializeToolResult(tt.GetProperty("Result")!.GetValue(task), JsonOptions) : "";
+            }
+            else
+            {
+                resultStr = SerializeToolResult(result, JsonOptions);
+            }
+            activity?.SetTag("agentic.tool.success", true);
+            return resultStr;
         }
-        return SerializeToolResult(result, JsonOptions);
+        catch (Exception ex)
+        {
+            AgenticTelemetry.ToolErrors.Add(1, new KeyValuePair<string, object?>("agentic.tool.name", name));
+            AgenticTelemetry.RecordException(activity, ex);
+            throw;
+        }
+        finally
+        {
+            AgenticTelemetry.ToolInvocationDuration.Record(sw.Elapsed.TotalMilliseconds,
+                new KeyValuePair<string, object?>("agentic.tool.name", name));
+        }
     }
 
     private sealed class ReflectedTool

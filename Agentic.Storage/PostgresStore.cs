@@ -73,12 +73,25 @@ internal sealed class PostgresCollection<T>(string name, PostgresStore store) : 
 
     public async Task<string> InsertAsync(T doc, float[]? embedding = null, CancellationToken ct = default)
     {
+        using var activity = StorageTelemetry.StartActivity("storage.insert");
+        StorageTelemetry.Operations.Add(1, new KeyValuePair<string, object?>("agentic.storage.operation", "insert"));
+        activity?.SetTag("db.system", "postgresql");
+        activity?.SetTag("agentic.storage.collection", _table);
         var id = Guid.CreateVersion7().ToString("N");
-        await UpsertAsync(id, doc, embedding, ct);
+        await UpsertCoreAsync(id, doc, embedding, ct);
         return id;
     }
 
     public async Task UpsertAsync(string id, T doc, float[]? embedding = null, CancellationToken ct = default)
+    {
+        using var activity = StorageTelemetry.StartActivity("storage.upsert");
+        StorageTelemetry.Operations.Add(1, new KeyValuePair<string, object?>("agentic.storage.operation", "upsert"));
+        activity?.SetTag("db.system", "postgresql");
+        activity?.SetTag("agentic.storage.collection", _table);
+        await UpsertCoreAsync(id, doc, embedding, ct);
+    }
+
+    private async Task UpsertCoreAsync(string id, T doc, float[]? embedding, CancellationToken ct)
     {
         var json = JsonSerializer.Serialize(doc);
         using var conn = store.Open();
@@ -97,6 +110,10 @@ internal sealed class PostgresCollection<T>(string name, PostgresStore store) : 
 
     public async Task DeleteAsync(string id, CancellationToken ct = default)
     {
+        using var activity = StorageTelemetry.StartActivity("storage.delete");
+        StorageTelemetry.Operations.Add(1, new KeyValuePair<string, object?>("agentic.storage.operation", "delete"));
+        activity?.SetTag("db.system", "postgresql");
+        activity?.SetTag("agentic.storage.collection", _table);
         using var conn = store.Open();
         await EnsureAsync(conn);
         using var cmd = conn.CreateCommand();
@@ -107,6 +124,10 @@ internal sealed class PostgresCollection<T>(string name, PostgresStore store) : 
 
     public async Task<T?> GetAsync(string id, CancellationToken ct = default)
     {
+        using var activity = StorageTelemetry.StartActivity("storage.get");
+        StorageTelemetry.Operations.Add(1, new KeyValuePair<string, object?>("agentic.storage.operation", "get"));
+        activity?.SetTag("db.system", "postgresql");
+        activity?.SetTag("agentic.storage.collection", _table);
         using var conn = store.Open();
         await EnsureAsync(conn);
         using var cmd = conn.CreateCommand();
@@ -134,28 +155,51 @@ internal sealed class PostgresCollection<T>(string name, PostgresStore store) : 
     public async Task<List<SearchResult<T>>> SearchAsync(
         float[] query, int topK = 5, CancellationToken ct = default)
     {
-        var heap = new SortedList<float, SearchResult<T>>(
-            Comparer<float>.Create((a, b) => a == b ? 1 : a.CompareTo(b)));
-
-        using var conn = store.Open();
-        await EnsureAsync(conn);
-        using var cmd = conn.CreateCommand();
-        cmd.CommandText = $"SELECT id, data, embedding FROM {_table} WHERE embedding IS NOT NULL";
-        using var r = await cmd.ExecuteReaderAsync(ct);
-
-        while (await r.ReadAsync(ct))
+        using var activity = StorageTelemetry.StartActivity("storage.search");
+        StorageTelemetry.Operations.Add(1, new KeyValuePair<string, object?>("agentic.storage.operation", "search"));
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        try
         {
-            var emb   = VectorMath.Unpack((byte[])r.GetValue(2));
-            var score = VectorMath.Cosine(emb, query);
+            activity?.SetTag("db.system", "postgresql");
+            activity?.SetTag("agentic.storage.collection", _table);
+            activity?.SetTag("agentic.storage.top_k", topK);
 
-            if (heap.Count < topK || score > heap.Keys[0])
+            var heap = new SortedList<float, SearchResult<T>>(
+                Comparer<float>.Create((a, b) => a == b ? 1 : a.CompareTo(b)));
+
+            using var conn = store.Open();
+            await EnsureAsync(conn);
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = $"SELECT id, data, embedding FROM {_table} WHERE embedding IS NOT NULL";
+            using var r = await cmd.ExecuteReaderAsync(ct);
+
+            while (await r.ReadAsync(ct))
             {
-                var doc = JsonSerializer.Deserialize<T>(r.GetString(1))!;
-                heap.Add(score, new(r.GetString(0), doc, score));
-                if (heap.Count > topK) heap.RemoveAt(0);
-            }
-        }
+                var emb   = VectorMath.Unpack((byte[])r.GetValue(2));
+                var score = VectorMath.Cosine(emb, query);
 
-        return [.. heap.Values.Reverse()];
+                if (heap.Count < topK || score > heap.Keys[0])
+                {
+                    var doc = JsonSerializer.Deserialize<T>(r.GetString(1))!;
+                    heap.Add(score, new(r.GetString(0), doc, score));
+                    if (heap.Count > topK) heap.RemoveAt(0);
+                }
+            }
+
+            var results = heap.Values.Reverse().ToList();
+            activity?.SetTag("agentic.storage.results_count", results.Count);
+            return results;
+        }
+        catch (Exception ex)
+        {
+            StorageTelemetry.OperationErrors.Add(1);
+            StorageTelemetry.RecordException(activity, ex);
+            throw;
+        }
+        finally
+        {
+            StorageTelemetry.OperationDuration.Record(sw.Elapsed.TotalMilliseconds,
+                new KeyValuePair<string, object?>("agentic.storage.operation", "search"));
+        }
     }
 }

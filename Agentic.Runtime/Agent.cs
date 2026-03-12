@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Text;
@@ -411,23 +412,44 @@ public sealed class Agent : IAsyncDisposable, IDisposable
     {
         ArgumentNullException.ThrowIfNull(request);
         ThrowIfDisposed();
-        await EnsureSessionAsync(ct);
 
-        SetStatus(AgentTaskStatus.Running);
-
+        using var activity = Mantle.RuntimeTelemetry.StartActivity("runtime.agent.run");
+        Mantle.RuntimeTelemetry.InferenceCalls.Add(1);
+        var sw = Stopwatch.StartNew();
         try
         {
-            var response = await _session!.CreateResponseAsync(request, ct);
+            activity?.SetTag("agentic.runtime.agent.name", Name);
+            activity?.SetTag("gen_ai.request.model", request.Model);
+            await EnsureSessionAsync(ct);
 
-            _previousResponseId = response.Id;
-            _lastResponse = response;
-            SetStatus(AgentTaskStatus.Completed);
-            return response;
+            SetStatus(AgentTaskStatus.Running);
+
+            try
+            {
+                var response = await _session!.CreateResponseAsync(request, ct);
+
+                _previousResponseId = response.Id;
+                _lastResponse = response;
+                activity?.SetTag("gen_ai.response.id", response.Id);
+                activity?.SetTag("gen_ai.usage.input_tokens", response.Usage.InputTokens);
+                activity?.SetTag("gen_ai.usage.output_tokens", response.Usage.OutputTokens);
+                SetStatus(AgentTaskStatus.Completed);
+                return response;
+            }
+            catch
+            {
+                SetStatus(AgentTaskStatus.Failed);
+                throw;
+            }
         }
-        catch
+        catch (Exception ex)
         {
-            SetStatus(AgentTaskStatus.Failed);
+            Mantle.RuntimeTelemetry.RecordException(activity, ex);
             throw;
+        }
+        finally
+        {
+            Mantle.RuntimeTelemetry.InferenceDuration.Record(sw.Elapsed.TotalMilliseconds);
         }
     }
 
@@ -480,6 +502,8 @@ public sealed class Agent : IAsyncDisposable, IDisposable
     /// </summary>
     public async Task<string> AskAsync(string input, CancellationToken ct = default)
     {
+        using var activity = Mantle.RuntimeTelemetry.StartActivity("runtime.agent.ask");
+        activity?.SetTag("agentic.runtime.agent.name", Name);
         var response = await RunAsync(input, ct);
         return string.Concat(response.Output
             .OfType<Mantle.ResponseMessageItem>()

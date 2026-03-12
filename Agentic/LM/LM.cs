@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Net.Http.Json;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
@@ -100,15 +101,38 @@ public sealed class OpenAIBackend : ILLMBackend, IDisposable
         ReasoningEffort? reasoning = null,
         string? model = null, CancellationToken ct = default)
     {
-        var req = new ResponseRequest
+        using var activity = AgenticTelemetry.StartActivity("lm.respond", ActivityKind.Client);
+        AgenticTelemetry.LmRequests.Add(1, new KeyValuePair<string, object?>("agentic.lm.method", "Respond"));
+        var sw = Stopwatch.StartNew();
+        try
         {
-            Model = ResolveModel(model), Input = input, Instructions = instructions,
-            PreviousResponseId = previousResponseId,
-            Tools = tools,
-        };
-        ApplyInference(req, inference ?? _config.Inference);
-        ApplyReasoning(req, reasoning ?? _config.Reasoning);
-        return await PostAsync<ResponseRequest, ResponseResponse>("/v1/responses", req, ct);
+            var resolvedModel = ResolveModel(model);
+            activity?.SetTag("gen_ai.system", "openai_compatible");
+            activity?.SetTag("gen_ai.request.model", resolvedModel);
+            activity?.SetTag("server.address", _config.Endpoint);
+            var req = new ResponseRequest
+            {
+                Model = resolvedModel, Input = input, Instructions = instructions,
+                PreviousResponseId = previousResponseId,
+                Tools = tools,
+            };
+            ApplyInference(req, inference ?? _config.Inference);
+            ApplyReasoning(req, reasoning ?? _config.Reasoning);
+            var result = await PostAsync<ResponseRequest, ResponseResponse>("/v1/responses", req, ct);
+            activity?.SetTag("gen_ai.response.id", result.Id);
+            return result;
+        }
+        catch (Exception ex)
+        {
+            AgenticTelemetry.LmRequestErrors.Add(1, new KeyValuePair<string, object?>("agentic.lm.method", "Respond"));
+            AgenticTelemetry.RecordException(activity, ex);
+            throw;
+        }
+        finally
+        {
+            AgenticTelemetry.LmRequestDuration.Record(sw.Elapsed.TotalMilliseconds,
+                new KeyValuePair<string, object?>("agentic.lm.method", "Respond"));
+        }
     }
 
     /// <summary>Sends a multi-turn conversation history to <c>/v1/responses</c> and returns the full response.</summary>
@@ -126,15 +150,38 @@ public sealed class OpenAIBackend : ILLMBackend, IDisposable
         ReasoningEffort? reasoning = null,
         string? model = null, CancellationToken ct = default)
     {
-        var req = new ResponseRequest
+        using var activity = AgenticTelemetry.StartActivity("lm.respond", ActivityKind.Client);
+        AgenticTelemetry.LmRequests.Add(1, new KeyValuePair<string, object?>("agentic.lm.method", "Respond"));
+        var sw = Stopwatch.StartNew();
+        try
         {
-            Model = ResolveModel(model), Input = input.ToList(), Instructions = instructions,
-            PreviousResponseId = previousResponseId,
-            Tools = tools,
-        };
-        ApplyInference(req, inference ?? _config.Inference);
-        ApplyReasoning(req, reasoning ?? _config.Reasoning);
-        return await PostAsync<ResponseRequest, ResponseResponse>("/v1/responses", req, ct);
+            var resolvedModel = ResolveModel(model);
+            activity?.SetTag("gen_ai.system", "openai_compatible");
+            activity?.SetTag("gen_ai.request.model", resolvedModel);
+            activity?.SetTag("server.address", _config.Endpoint);
+            var req = new ResponseRequest
+            {
+                Model = resolvedModel, Input = input.ToList(), Instructions = instructions,
+                PreviousResponseId = previousResponseId,
+                Tools = tools,
+            };
+            ApplyInference(req, inference ?? _config.Inference);
+            ApplyReasoning(req, reasoning ?? _config.Reasoning);
+            var result = await PostAsync<ResponseRequest, ResponseResponse>("/v1/responses", req, ct);
+            activity?.SetTag("gen_ai.response.id", result.Id);
+            return result;
+        }
+        catch (Exception ex)
+        {
+            AgenticTelemetry.LmRequestErrors.Add(1, new KeyValuePair<string, object?>("agentic.lm.method", "Respond"));
+            AgenticTelemetry.RecordException(activity, ex);
+            throw;
+        }
+        finally
+        {
+            AgenticTelemetry.LmRequestDuration.Record(sw.Elapsed.TotalMilliseconds,
+                new KeyValuePair<string, object?>("agentic.lm.method", "Respond"));
+        }
     }
 
     /// <summary>Streaming /v1/responses — yields SSE events as they arrive.</summary>
@@ -253,25 +300,69 @@ public sealed class OpenAIBackend : ILLMBackend, IDisposable
     /// <summary>Generate an embedding vector for a single text input.</summary>
     public async Task<float[]> EmbedAsync(string input, CancellationToken ct = default)
     {
-        var model = _config.EmbeddingModel
-            ?? throw new InvalidOperationException("EmbeddingModel is not configured in LMConfig.");
-        var resp = await PostAsync<EmbeddingRequest, EmbeddingResponse>("/v1/embeddings", new()
+        using var activity = AgenticTelemetry.StartActivity("lm.embed", ActivityKind.Client);
+        AgenticTelemetry.EmbeddingRequests.Add(1);
+        AgenticTelemetry.LmRequests.Add(1, new KeyValuePair<string, object?>("agentic.lm.method", "Embed"));
+        var sw = Stopwatch.StartNew();
+        try
         {
-            Model = model, Input = input,
-        }, ct);
-        return resp.Data.FirstOrDefault()?.Embedding ?? [];
+            var model = _config.EmbeddingModel
+                ?? throw new InvalidOperationException("EmbeddingModel is not configured in LMConfig.");
+            activity?.SetTag("gen_ai.request.model", model);
+            activity?.SetTag("server.address", _config.Endpoint);
+            var resp = await PostAsync<EmbeddingRequest, EmbeddingResponse>("/v1/embeddings", new()
+            {
+                Model = model, Input = input,
+            }, ct);
+            var result = resp.Data.FirstOrDefault()?.Embedding ?? [];
+            activity?.SetTag("agentic.embedding.dimensions", result.Length);
+            return result;
+        }
+        catch (Exception ex)
+        {
+            AgenticTelemetry.LmRequestErrors.Add(1, new KeyValuePair<string, object?>("agentic.lm.method", "Embed"));
+            AgenticTelemetry.RecordException(activity, ex);
+            throw;
+        }
+        finally
+        {
+            AgenticTelemetry.LmRequestDuration.Record(sw.Elapsed.TotalMilliseconds,
+                new KeyValuePair<string, object?>("agentic.lm.method", "Embed"));
+        }
     }
 
     /// <summary>Generate embedding vectors for multiple text inputs in a single batch.</summary>
     public async Task<List<float[]>> EmbedBatchAsync(IEnumerable<string> inputs, CancellationToken ct = default)
     {
-        var model = _config.EmbeddingModel
-            ?? throw new InvalidOperationException("EmbeddingModel is not configured in LMConfig.");
-        var resp = await PostAsync<EmbeddingRequest, EmbeddingResponse>("/v1/embeddings", new()
+        using var activity = AgenticTelemetry.StartActivity("lm.embed_batch", ActivityKind.Client);
+        AgenticTelemetry.EmbeddingRequests.Add(1);
+        AgenticTelemetry.LmRequests.Add(1, new KeyValuePair<string, object?>("agentic.lm.method", "EmbedBatch"));
+        var sw = Stopwatch.StartNew();
+        try
         {
-            Model = model, Input = inputs.ToList(),
-        }, ct);
-        return resp.Data.OrderBy(d => d.Index).Select(d => d.Embedding).ToList();
+            var model = _config.EmbeddingModel
+                ?? throw new InvalidOperationException("EmbeddingModel is not configured in LMConfig.");
+            activity?.SetTag("gen_ai.request.model", model);
+            activity?.SetTag("server.address", _config.Endpoint);
+            var resp = await PostAsync<EmbeddingRequest, EmbeddingResponse>("/v1/embeddings", new()
+            {
+                Model = model, Input = inputs.ToList(),
+            }, ct);
+            var result = resp.Data.OrderBy(d => d.Index).Select(d => d.Embedding).ToList();
+            activity?.SetTag("agentic.embedding.count", result.Count);
+            return result;
+        }
+        catch (Exception ex)
+        {
+            AgenticTelemetry.LmRequestErrors.Add(1, new KeyValuePair<string, object?>("agentic.lm.method", "EmbedBatch"));
+            AgenticTelemetry.RecordException(activity, ex);
+            throw;
+        }
+        finally
+        {
+            AgenticTelemetry.LmRequestDuration.Record(sw.Elapsed.TotalMilliseconds,
+                new KeyValuePair<string, object?>("agentic.lm.method", "EmbedBatch"));
+        }
     }
 
     private async Task<TResp> PostAsync<TReq, TResp>(string path, TReq body, CancellationToken ct)
@@ -308,12 +399,21 @@ public sealed class OpenAIBackend : ILLMBackend, IDisposable
     /// </summary>
     public async Task<bool> PingAsync(CancellationToken ct = default)
     {
+        using var activity = AgenticTelemetry.StartActivity("lm.ping", ActivityKind.Client);
+        activity?.SetTag("server.address", _config.Endpoint);
         try
         {
             using var r = await _http.GetAsync("/v1/models", ct);
-            return r.IsSuccessStatusCode;
+            var ok = r.IsSuccessStatusCode;
+            activity?.SetTag("agentic.ping.success", ok);
+            return ok;
         }
-        catch { return false; }
+        catch (Exception ex)
+        {
+            activity?.SetTag("agentic.ping.success", false);
+            AgenticTelemetry.RecordException(activity, ex);
+            return false;
+        }
     }
 
     private static void ApplyInference(ResponseRequest request, InferenceConfig? inference)

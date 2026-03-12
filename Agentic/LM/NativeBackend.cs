@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 using Agentic.Runtime.Core;
@@ -85,10 +86,31 @@ public sealed class NativeBackend : ILLMBackend, IAsyncDisposable, IDisposable
         ReasoningEffort? reasoning = null,
         string? model = null, CancellationToken ct = default)
     {
-        var session = await EnsureSessionAsync(ct);
-        var request = CreateRequest(input, instructions, previousResponseId, inference, tools, reasoning, model, stream: false);
-        var response = await session.CreateResponseAsync(request, ct);
-        return MapResponse(response);
+        using var activity = AgenticTelemetry.StartActivity("lm.native.respond");
+        AgenticTelemetry.LmRequests.Add(1, new KeyValuePair<string, object?>("agentic.lm.method", "NativeRespond"));
+        var sw = Stopwatch.StartNew();
+        try
+        {
+            activity?.SetTag("gen_ai.system", "native");
+            activity?.SetTag("gen_ai.request.model", ResolveModel(model));
+            var session = await EnsureSessionAsync(ct);
+            var request = CreateRequest(input, instructions, previousResponseId, inference, tools, reasoning, model, stream: false);
+            var response = await session.CreateResponseAsync(request, ct);
+            var result = MapResponse(response);
+            activity?.SetTag("gen_ai.response.id", result.Id);
+            return result;
+        }
+        catch (Exception ex)
+        {
+            AgenticTelemetry.LmRequestErrors.Add(1, new KeyValuePair<string, object?>("agentic.lm.method", "NativeRespond"));
+            AgenticTelemetry.RecordException(activity, ex);
+            throw;
+        }
+        finally
+        {
+            AgenticTelemetry.LmRequestDuration.Record(sw.Elapsed.TotalMilliseconds,
+                new KeyValuePair<string, object?>("agentic.lm.method", "NativeRespond"));
+        }
     }
 
     public async IAsyncEnumerable<StreamEvent> RespondStreamingAsync(
@@ -161,19 +183,48 @@ public sealed class NativeBackend : ILLMBackend, IAsyncDisposable, IDisposable
 
     public async Task<float[]> EmbedAsync(string input, CancellationToken ct = default)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(input);
-        var session = await EnsureSessionAsync(ct);
-        return await session.EmbedAsync(input, ct);
+        using var activity = AgenticTelemetry.StartActivity("lm.native.embed");
+        AgenticTelemetry.EmbeddingRequests.Add(1);
+        AgenticTelemetry.LmRequests.Add(1, new KeyValuePair<string, object?>("agentic.lm.method", "NativeEmbed"));
+        try
+        {
+            activity?.SetTag("gen_ai.system", "native");
+            ArgumentException.ThrowIfNullOrWhiteSpace(input);
+            var session = await EnsureSessionAsync(ct);
+            var result = await session.EmbedAsync(input, ct);
+            activity?.SetTag("agentic.embedding.dimensions", result.Length);
+            return result;
+        }
+        catch (Exception ex)
+        {
+            AgenticTelemetry.LmRequestErrors.Add(1, new KeyValuePair<string, object?>("agentic.lm.method", "NativeEmbed"));
+            AgenticTelemetry.RecordException(activity, ex);
+            throw;
+        }
     }
 
     public async Task<List<float[]>> EmbedBatchAsync(IEnumerable<string> inputs, CancellationToken ct = default)
     {
-        ArgumentNullException.ThrowIfNull(inputs);
+        using var activity = AgenticTelemetry.StartActivity("lm.native.embed_batch");
+        AgenticTelemetry.EmbeddingRequests.Add(1);
+        AgenticTelemetry.LmRequests.Add(1, new KeyValuePair<string, object?>("agentic.lm.method", "NativeEmbedBatch"));
+        try
+        {
+            activity?.SetTag("gen_ai.system", "native");
+            ArgumentNullException.ThrowIfNull(inputs);
 
-        var vectors = new List<float[]>();
-        foreach (var input in inputs)
-            vectors.Add(await EmbedAsync(input, ct));
-        return vectors;
+            var vectors = new List<float[]>();
+            foreach (var input in inputs)
+                vectors.Add(await EmbedAsync(input, ct));
+            activity?.SetTag("agentic.embedding.count", vectors.Count);
+            return vectors;
+        }
+        catch (Exception ex)
+        {
+            AgenticTelemetry.LmRequestErrors.Add(1, new KeyValuePair<string, object?>("agentic.lm.method", "NativeEmbedBatch"));
+            AgenticTelemetry.RecordException(activity, ex);
+            throw;
+        }
     }
 
     public async Task<bool> PingAsync(CancellationToken ct = default)
