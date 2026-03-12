@@ -10,6 +10,7 @@ A lightweight .NET library for building LLM-powered agents with streaming chat, 
 ## Features
 
 - **`ILLMBackend`** â€” unified abstraction over any inference source; swap backends without touching agent code
+- **`BackendRouter`** â€” compose multiple backends behind one `ILLMBackend`, with separate routing for chat and embeddings
 - **`OpenAIBackend`** â€” OpenAI-compatible REST client (`/v1/responses`) with streaming, embeddings, vision and named model aliases
 - **`NativeBackend`** â€” local llama.cpp inference via `Agentic.Runtime`; auto-downloads and installs the right binaries from GitHub on first run
 - **`LlamaRuntimeInstaller`** â€” on-demand runtime installer supporting CPU, CUDA and Vulkan backends on Windows and Linux, with optional release pinning
@@ -109,6 +110,68 @@ public interface ILLMBackend
 ```
 
 Implement this interface to add your own backend (Ollama, Anthropic proxy, test stub, etc.) and pass it straight to `Agent`.
+
+---
+
+## `BackendRouter`
+
+`BackendRouter` lets you register multiple named `ILLMBackend` instances and expose them as a single backend. Chat requests route to the default backend unless you pass a specific `model` name; embedding requests always route to the backend marked as the embedding backend.
+
+### Chat + embedding example
+
+```csharp
+using Agentic;
+using Agentic.Runtime.Core;
+using Mantle = Agentic.Runtime.Mantle;
+
+var chatOptions = new Mantle.LmSessionOptions
+{
+    ModelPath     = @"/models/qwen3.5-9b-q4.gguf",
+    ContextTokens = 8192,
+    MaxToolRounds = 32,
+    DefaultRequest = new Mantle.ResponseRequest
+    {
+        MaxOutputTokens = 1024,
+        EnableThinking  = false,
+    },
+};
+
+var embedOptions = new Mantle.LmSessionOptions
+{
+    ModelPath     = @"/models/embeddinggemma-300m-qat-q4.gguf",
+    ContextTokens = 2048,
+    BatchTokens   = 512,
+};
+
+await using var chatBackend  = new NativeBackend(chatOptions,  LlamaBackend.Cuda);
+await using var embedBackend = new NativeBackend(embedOptions, LlamaBackend.Cuda);
+
+await using var lm = new BackendRouter()
+    .Add("chat",  chatBackend,  isDefault: true)
+    .Add("embed", embedBackend, isEmbedding: true);
+
+// Chat calls go to the default chat backend
+var agent = new Agent(lm, new AgentOptions { SystemPrompt = "You are a helpful assistant." });
+await agent.ChatStreamAsync("Summarise this document.");
+
+// Embedding calls go to the embedding backend
+var vector = await lm.EmbedAsync("What is the warranty period?");
+
+// You can also route chat explicitly by name when multiple chat backends are registered
+var response = await lm.RespondAsync("Explain this code.", model: "chat");
+```
+
+### Routing rules
+
+| Call | Backend used |
+|------|--------------|
+| `RespondAsync(model: "name")` | The backend registered under `name` |
+| `RespondAsync(model: null)` | The default chat backend |
+| `RespondStreamingAsync(...)` | Same rules as `RespondAsync` |
+| `EmbedAsync(...)` | The backend added with `isEmbedding: true` |
+| `EmbedBatchAsync(...)` | Same as `EmbedAsync` |
+
+This is useful when you want a larger model for chat and reasoning, but a smaller faster model for embeddings.
 
 ---
 
