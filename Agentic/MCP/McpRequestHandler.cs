@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -85,13 +86,18 @@ public sealed class McpRequestHandler
     /// </summary>
     public async Task<JsonRpcResponse?> HandleAsync(JsonRpcRequest request, ToolContext? toolContext = null, CancellationToken ct = default)
     {
-        _logger.LogDebug("MCP <-- {Method} (id={Id})", request.Method, request.Id);
-
-        if (request.IsNotification) return null;
-
+        using var activity = AgenticTelemetry.StartActivity("mcp.handle", ActivityKind.Server);
+        AgenticTelemetry.McpRequests.Add(1, new KeyValuePair<string, object?>("agentic.mcp.method", request.Method));
+        var sw = Stopwatch.StartNew();
         try
         {
-            return request.Method switch
+            activity?.SetTag("agentic.mcp.method", request.Method);
+            activity?.SetTag("agentic.mcp.request_id", request.Id?.ToString());
+            _logger.LogDebug("MCP <-- {Method} (id={Id})", request.Method, request.Id);
+
+            if (request.IsNotification) return null;
+
+            var result = request.Method switch
             {
                 "initialize"     => HandleInitialize(request),
                 "ping"           => JsonRpcResponse.Success(request.Id, new { }),
@@ -106,16 +112,25 @@ public sealed class McpRequestHandler
                 "logging/setLevel"         => HandleLoggingSetLevel(request),
                 _ => JsonRpcResponse.Fail(request.Id, JsonRpcError.MethodNotFound, $"Method not found: {request.Method}"),
             };
+            activity?.SetTag("agentic.mcp.success", true);
+            return result;
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
             _logger.LogWarning("MCP client disconnected during {Method}", request.Method);
+            activity?.SetTag("agentic.mcp.cancelled", true);
             return null;
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "MCP handler error for {Method}", request.Method);
+            AgenticTelemetry.RecordException(activity, ex);
             return JsonRpcResponse.Fail(request.Id, JsonRpcError.InternalError, ex.Message);
+        }
+        finally
+        {
+            AgenticTelemetry.McpRequestDuration.Record(sw.Elapsed.TotalMilliseconds,
+                new KeyValuePair<string, object?>("agentic.mcp.method", request.Method));
         }
     }
 

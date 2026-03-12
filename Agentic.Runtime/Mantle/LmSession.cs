@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Agentic.Runtime.Core;
 using System.Runtime.CompilerServices;
 using System.Text;
@@ -88,8 +89,19 @@ public sealed class LmSession : IAsyncDisposable, IDisposable
     /// </summary>
     public static async Task<LmSession> CreateAsync(LmSessionOptions options, CancellationToken ct = default)
     {
-        var engine = await LmEngine.CreateAsync(options, ct);
-        return new LmSession(options, engine);
+        using var activity = RuntimeTelemetry.StartActivity("runtime.session.create");
+        RuntimeTelemetry.SessionsCreated.Add(1);
+        try
+        {
+            activity?.SetTag("agentic.runtime.model_path", options.ModelPath);
+            var engine = await LmEngine.CreateAsync(options, ct);
+            return new LmSession(options, engine);
+        }
+        catch (Exception ex)
+        {
+            RuntimeTelemetry.RecordException(activity, ex);
+            throw;
+        }
     }
 
     /// <summary>
@@ -148,39 +160,59 @@ public sealed class LmSession : IAsyncDisposable, IDisposable
 
         ThrowIfDisposed();
 
-        bool isReentrant = s_reentrancyOwner.Value == this;
-        List<ChatMessage>? savedHistory = null;
-
-        if (isReentrant)
-            savedHistory = SaveHistorySnapshot();
-        else
-            s_reentrancyOwner.Value = this;
-
+        using var activity = RuntimeTelemetry.StartActivity("runtime.session.create_response");
+        RuntimeTelemetry.InferenceCalls.Add(1);
+        var sw = Stopwatch.StartNew();
         try
         {
-            var responseHistory = BuildResponseHistory(request);
-            if (responseHistory.Count == 0)
-                throw new InvalidOperationException("Response request did not produce any renderable history.");
+            activity?.SetTag("gen_ai.request.model", request.Model);
 
-            int historyPrefixCount = Math.Max(0, responseHistory.Count - 1);
+            bool isReentrant = s_reentrancyOwner.Value == this;
+            List<ChatMessage>? savedHistory = null;
 
-            ResetCore(clearResponses: false);
-            _history.AddRange(responseHistory.Take(historyPrefixCount));
+            if (isReentrant)
+                savedHistory = SaveHistorySnapshot();
+            else
+                s_reentrancyOwner.Value = this;
 
-            var executionContext = await CreateResponseExecutionContextAsync(request, ct).ConfigureAwait(false);
-
-            await foreach (var _ in GenerateCoreAsync(responseHistory[^1], executionContext, ct).ConfigureAwait(false))
+            try
             {
-            }
+                var responseHistory = BuildResponseHistory(request);
+                if (responseHistory.Count == 0)
+                    throw new InvalidOperationException("Response request did not produce any renderable history.");
 
-            return FinalizeResponse(request.Model, request.PreviousResponseId, historyPrefixCount);
+                int historyPrefixCount = Math.Max(0, responseHistory.Count - 1);
+
+                ResetCore(clearResponses: false);
+                _history.AddRange(responseHistory.Take(historyPrefixCount));
+
+                var executionContext = await CreateResponseExecutionContextAsync(request, ct).ConfigureAwait(false);
+
+                await foreach (var _ in GenerateCoreAsync(responseHistory[^1], executionContext, ct).ConfigureAwait(false))
+                {
+                }
+
+                var result = FinalizeResponse(request.Model, request.PreviousResponseId, historyPrefixCount);
+                activity?.SetTag("gen_ai.usage.input_tokens", result.Usage.InputTokens);
+                activity?.SetTag("gen_ai.usage.output_tokens", result.Usage.OutputTokens);
+                return result;
+            }
+            finally
+            {
+                if (isReentrant)
+                    RestoreAfterReentrantCall(savedHistory!);
+                else
+                    s_reentrancyOwner.Value = null;
+            }
+        }
+        catch (Exception ex)
+        {
+            RuntimeTelemetry.RecordException(activity, ex);
+            throw;
         }
         finally
         {
-            if (isReentrant)
-                RestoreAfterReentrantCall(savedHistory!);
-            else
-                s_reentrancyOwner.Value = null;
+            RuntimeTelemetry.InferenceDuration.Record(sw.Elapsed.TotalMilliseconds);
         }
     }
 
@@ -235,19 +267,39 @@ public sealed class LmSession : IAsyncDisposable, IDisposable
     /// <summary>
     /// Generates an embedding vector as <see cref="float"/> values.
     /// </summary>
-    public Task<float[]> EmbedAsync(string text, CancellationToken ct = default)
+    public async Task<float[]> EmbedAsync(string text, CancellationToken ct = default)
     {
         ThrowIfDisposed();
-        return _engine.EmbedAsync(text, ct);
+        using var activity = RuntimeTelemetry.StartActivity("runtime.session.embed");
+        RuntimeTelemetry.EmbeddingCalls.Add(1);
+        try
+        {
+            return await _engine.EmbedAsync(text, ct);
+        }
+        catch (Exception ex)
+        {
+            RuntimeTelemetry.RecordException(activity, ex);
+            throw;
+        }
     }
 
     /// <summary>
     /// Generates an embedding vector as <see cref="double"/> values.
     /// </summary>
-    public Task<double[]> EmbedAsDoubleAsync(string text, CancellationToken ct = default)
+    public async Task<double[]> EmbedAsDoubleAsync(string text, CancellationToken ct = default)
     {
         ThrowIfDisposed();
-        return _engine.EmbedAsDoubleAsync(text, ct);
+        using var activity = RuntimeTelemetry.StartActivity("runtime.session.embed");
+        RuntimeTelemetry.EmbeddingCalls.Add(1);
+        try
+        {
+            return await _engine.EmbedAsDoubleAsync(text, ct);
+        }
+        catch (Exception ex)
+        {
+            RuntimeTelemetry.RecordException(activity, ex);
+            throw;
+        }
     }
 
     /// <summary>
