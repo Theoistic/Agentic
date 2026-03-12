@@ -1,6 +1,3 @@
-using System.Diagnostics;
-using System.Runtime.CompilerServices;
-
 namespace Agentic;
 
 /// <summary>
@@ -14,7 +11,7 @@ namespace Agentic;
 /// </para>
 /// <para>
 /// Backends are registered via the fluent <see cref="Add"/> method. The first non-embedding
-/// backend added becomes the default unless <paramref name="isDefault"/> is explicitly set.
+/// backend added becomes the default unless <c>isDefault</c> is explicitly set.
 /// </para>
 /// </summary>
 public sealed class BackendRouter : ILLMBackend, IAsyncDisposable, IDisposable
@@ -31,6 +28,7 @@ public sealed class BackendRouter : ILLMBackend, IAsyncDisposable, IDisposable
     /// The routing key. Pass this as the <c>model</c> argument to <c>RespondAsync</c> /
     /// <c>RespondStreamingAsync</c> to target this backend explicitly.
     /// </param>
+    /// <param name="backend">The backend instance to register.</param>
     /// <param name="isDefault">
     /// When <see langword="true"/> this backend becomes the default chat backend.
     /// The first non-embedding backend added is automatically designated default.
@@ -101,7 +99,7 @@ public sealed class BackendRouter : ILLMBackend, IAsyncDisposable, IDisposable
         InferenceConfig? inference = null, List<ToolDefinition>? tools = null,
         ReasoningEffort? reasoning = null,
         string? model = null,
-        [EnumeratorCancellation] CancellationToken ct = default)
+        CancellationToken ct = default)
         => ResolveChat(model).RespondStreamingAsync(input, instructions, previousResponseId, inference, tools, reasoning, model, ct);
 
     public IAsyncEnumerable<StreamEvent> RespondStreamingAsync(
@@ -110,7 +108,7 @@ public sealed class BackendRouter : ILLMBackend, IAsyncDisposable, IDisposable
         InferenceConfig? inference = null, List<ToolDefinition>? tools = null,
         ReasoningEffort? reasoning = null,
         string? model = null,
-        [EnumeratorCancellation] CancellationToken ct = default)
+        CancellationToken ct = default)
         => ResolveChat(model).RespondStreamingAsync(input, instructions, previousResponseId, inference, tools, reasoning, model, ct);
 
     public Task<float[]> EmbedAsync(string input, CancellationToken ct = default)

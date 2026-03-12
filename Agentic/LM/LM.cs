@@ -44,7 +44,7 @@ public class LMConfig
 //  LM client
 // ═══════════════════════════════════════════════════════════════════════════
 
-/// <summary>Thrown when an <see cref="LM"/> API call fails with an HTTP error or network problem.</summary>
+/// <summary>Thrown when an <see cref="OpenAIBackend"/> API call fails with an HTTP error or network problem.</summary>
 /// <param name="message">Human-readable error description.</param>
 /// <param name="statusCode">HTTP status code (0 when the server was unreachable).</param>
 /// <param name="body">Raw response body, if available.</param>
@@ -184,7 +184,7 @@ public sealed class OpenAIBackend : ILLMBackend, IDisposable
         }
     }
 
-    /// <summary>Streaming /v1/responses — yields SSE events as they arrive.</summary>
+    /// <summary>Streaming /v1/responses - yields SSE events as they arrive.</summary>
     /// <param name="input">User message text.</param>
     /// <param name="instructions">Optional system/instruction text.</param>
     /// <param name="previousResponseId">ID of the previous response for multi-turn chaining.</param>
@@ -280,7 +280,7 @@ public sealed class OpenAIBackend : ILLMBackend, IDisposable
                 }
                 catch (IOException)
                 {
-                    break;  // connection closed (abrupt or graceful) — treat as end of stream
+                    break;  // connection closed (abrupt or graceful) - treat as end of stream
                 }
                 if (line is null) break;
 

@@ -252,7 +252,7 @@ public sealed class ToolRegistry
         {
             visiting ??= [];
             if (!visiting.Add(u))
-                return ToolSchema.Object([], null);   // circular reference — break the cycle
+                return ToolSchema.Object([], null);   // circular reference - break the cycle
 
             try
             {

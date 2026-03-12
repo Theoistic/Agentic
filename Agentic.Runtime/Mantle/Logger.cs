@@ -78,12 +78,12 @@ public class TextWriterLogger : ILogger
 /// </summary>
 public sealed class ConsoleErrorLogger : TextWriterLogger
 {
-    public static readonly ConsoleErrorLogger Instance = new(Console.Error);
+    public static readonly ConsoleErrorLogger Instance = new();
 
     /// <summary>
-    /// Creates a console error logger for the provided writer.
+    /// Creates a console error logger that writes to <see cref="Console.Error"/>.
     /// </summary>
-    public ConsoleErrorLogger(TextWriter writer) : base(writer)
+    public ConsoleErrorLogger() : base(Console.Error)
     {
     }
 }

@@ -40,7 +40,7 @@ public sealed class AgentEvent
     public string? ToolName { get; init; }
     /// <summary>JSON-encoded tool arguments (set for <see cref="AgentEventKind.ToolCall"/>).</summary>
     public string? Arguments { get; init; }
-    /// <summary>Text payload — delta text, tool result, answer, system prompt, or compaction summary depending on <see cref="Kind"/>.</summary>
+    /// <summary>Text payload - delta text, tool result, answer, system prompt, or compaction summary depending on <see cref="Kind"/>.</summary>
     public string? Text { get; init; }
     /// <summary>The turn index within the current conversation.</summary>
     public int Round { get; init; }
@@ -83,7 +83,7 @@ public sealed class AgentOptions
     public string? Model { get; set; }
     /// <summary>
     /// Optional logger. When set, every <see cref="AgentEvent"/> is automatically written using structured
-    /// log messages — no manual <see cref="OnEvent"/> switch required.
+    /// log messages - no manual <see cref="OnEvent"/> switch required.
     /// <see cref="AgentEventKind.TextDelta"/> is written at <c>Trace</c> level; all others at <c>Debug</c>
     /// or <c>Information</c> level so standard log-level filters keep the output clean.
     /// </summary>

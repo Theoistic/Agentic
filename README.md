@@ -1,6 +1,6 @@
 # Agentic
 
-A lightweight .NET library for building LLM-powered agents with streaming chat, MCP tool hosting, context compaction, and vector storage — targeting both remote OpenAI-compatible APIs and local llama.cpp runtimes through a unified `ILLMBackend` abstraction.
+A lightweight .NET library for building LLM-powered agents with streaming chat, MCP tool hosting, context compaction, and vector storage, targeting both remote OpenAI-compatible APIs and local llama.cpp runtimes through a unified `ILLMBackend` abstraction.
 
 [![NuGet](https://img.shields.io/nuget/v/Theoistic.Agentic.svg)](https://www.nuget.org/packages/Theoistic.Agentic)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
@@ -9,19 +9,19 @@ A lightweight .NET library for building LLM-powered agents with streaming chat, 
 
 ## Features
 
-- **`ILLMBackend`** — unified abstraction over any inference source; swap backends without touching agent code
-- **`BackendRouter`** — compose multiple backends behind one `ILLMBackend`, with separate routing for chat and embeddings
-- **`OpenAIBackend`** — OpenAI-compatible REST client (`/v1/responses`) with streaming, embeddings, vision and named model aliases
-- **`NativeBackend`** — local llama.cpp inference via `Agentic.Runtime`; auto-downloads and installs the right binaries from GitHub on first run
-- **`LlamaRuntimeInstaller`** — on-demand runtime installer supporting CPU, CUDA and Vulkan backends on Windows and Linux, with optional release pinning
-- **Agent** — multi-turn streaming agent with automatic MCP tool orchestration
-- **Image input** — send images alongside text in any agent turn as a URL, local file, or base64 data URL
-- **Workflows** — ordered multi-step execution with per-step async guardrails and automatic retry
-- **Tool system** — define tools with `[Tool]` / `[ToolParam]` attributes; zero boilerplate
-- **Tool context** — HTTP headers from MCP requests forwarded to tool methods via `ToolContext`
-- **MCP server** — expose any `IAgentToolSet` over HTTP as a Model Context Protocol server in one line
-- **Context compaction** — automatically summarise older conversation history into a structured checkpoint before the context window fills up
-- **Vector storage** — `IStore` / `ICollection<T>` with SQLite (default) or PostgreSQL + pgvector backends
+- **`ILLMBackend`** - unified abstraction over any inference source; swap backends without touching agent code
+- **`BackendRouter`** - compose multiple backends behind one `ILLMBackend`, with separate routing for chat and embeddings
+- **`OpenAIBackend`** - OpenAI-compatible REST client (`/v1/responses`) with streaming, embeddings, vision and named model aliases
+- **`NativeBackend`** - local llama.cpp inference via `Agentic.Runtime`; auto-downloads and installs the right binaries from GitHub on first run
+- **`LlamaRuntimeInstaller`** - on-demand runtime installer supporting CPU, CUDA and Vulkan backends on Windows and Linux, with optional release pinning
+- **Agent** - multi-turn streaming agent with automatic MCP tool orchestration
+- **Image input** - send images alongside text in any agent turn as a URL, local file, or base64 data URL
+- **Workflows** - ordered multi-step execution with per-step async guardrails and automatic retry
+- **Tool system** - define tools with `[Tool]` / `[ToolParam]` attributes; zero boilerplate
+- **Tool context** - HTTP headers from MCP requests forwarded to tool methods via `ToolContext`
+- **MCP server** - expose any `IAgentToolSet` over HTTP as a Model Context Protocol server in one line
+- **Context compaction** - automatically summarise older conversation history into a structured checkpoint before the context window fills up
+- **Vector storage** - `IStore` / `ICollection<T>` with SQLite (default) or PostgreSQL + pgvector backends
 
 ---
 
@@ -58,7 +58,7 @@ var agent = new Agent(lm, new AgentOptions
 await agent.ChatStreamAsync("Hello!");
 ```
 
-### Local (llama.cpp — auto-installs runtime)
+### Local (llama.cpp - auto-installs runtime)
 
 ```csharp
 using Agentic;
@@ -91,7 +91,7 @@ On first run the correct llama.cpp release is downloaded and extracted to `%LOCA
 
 ## `ILLMBackend`
 
-The core abstraction. Both `OpenAIBackend` and `NativeBackend` implement it, and `Agent` accepts any implementation — you can swap backends or inject mocks without changing any agent code.
+The core abstraction. Both `OpenAIBackend` and `NativeBackend` implement it, and `Agent` accepts any implementation - you can swap backends or inject mocks without changing any agent code.
 
 ```csharp
 public interface ILLMBackend
@@ -216,7 +216,7 @@ Runs inference locally through `Agentic.Runtime` (llama.cpp). The session is ini
 
 ### Constructor overloads
 
-**Explicit backend directory** — you already have the binaries:
+**Explicit backend directory** - you already have the binaries:
 
 ```csharp
 var sessionOptions = new Mantle.LmSessionOptions
@@ -230,7 +230,7 @@ var sessionOptions = new Mantle.LmSessionOptions
 await using var lm = new NativeBackend(sessionOptions);
 ```
 
-**Auto-install** — downloads the runtime on first run:
+**Auto-install** - downloads the runtime on first run:
 
 ```csharp
 var sessionOptions = new Mantle.LmSessionOptions
@@ -238,7 +238,7 @@ var sessionOptions = new Mantle.LmSessionOptions
     ModelPath     = @"C:\models\qwen.gguf",
     ContextTokens = 8192,
     MaxToolRounds = 32,
-    // BackendDirectory is omitted — resolved automatically
+    // BackendDirectory is omitted - resolved automatically
 };
 
 await using var lm = new NativeBackend(
@@ -324,7 +324,7 @@ If `b8269` is already installed the call returns immediately. Pass `forceReinsta
 
 ## Agent
 
-`Agent` accepts any `ILLMBackend` and exposes four turn styles — single-shot or multi-turn, streaming or non-streaming — each with an optional images overload.
+`Agent` accepts any `ILLMBackend` and exposes four turn styles - single-shot or multi-turn, streaming or non-streaming - each with an optional images overload.
 
 ```csharp
 var agent = new Agent(lm, new AgentOptions
@@ -384,7 +384,7 @@ agent.ResetConversation();
 | `Reasoning` | `null` | Agent-level reasoning effort (see [Reasoning Control](#reasoning-control)) |
 | `Inference` | `null` | Agent-level sampling parameters (see [Inference Config](#inference-config)) |
 | `Model` | `null` | Agent-level model default (see [Model Selection](#model-selection)) |
-| `Logger` | `null` | `ILogger` — events are written automatically; no `OnEvent` switch needed |
+| `Logger` | `null` | `ILogger` - events are written automatically; no `OnEvent` switch needed |
 
 ### `AgentEvent` / `AgentEventKind`
 
@@ -407,7 +407,7 @@ agent.ResetConversation();
 
 ### Defining tools
 
-Add `[Tool]` to any public method on an `IAgentToolSet` class. Parameters get `[ToolParam]` descriptions — these form the JSON Schema sent to the model.
+Add `[Tool]` to any public method on an `IAgentToolSet` class. Parameters get `[ToolParam]` descriptions - these form the JSON Schema sent to the model.
 
 ```csharp
 using System.ComponentModel;
@@ -572,7 +572,7 @@ var sessionOptions = new Mantle.LmSessionOptions
 ## Vector Storage
 
 ```csharp
-// SQLite (default — no extra configuration required)
+// SQLite (default - no extra configuration required)
 services.AddStore();
 
 // PostgreSQL + pgvector
@@ -611,18 +611,18 @@ For models that support chain-of-thought reasoning (e.g. Qwen3), control thinkin
 | `High` | Enable thinking with high effort |
 
 ```csharp
-// 1 — Global default on the backend config
+// 1 - Global default on the backend config
 var lm = new OpenAIBackend(new LMConfig { ..., Reasoning = ReasoningEffort.None });
 
-// 2 — Per-agent default
+// 2 - Per-agent default
 var agent = new Agent(lm, new AgentOptions { Reasoning = ReasoningEffort.High });
 
-// 3 — Per-request override (highest precedence)
+// 3 - Per-request override (highest precedence)
 await agent.ChatStreamAsync("Complex question...", reasoning: ReasoningEffort.High);
 await agent.ChatStreamAsync("Quick question...",   reasoning: ReasoningEffort.None);
 ```
 
-> **Precedence:** per-request → `AgentOptions.Reasoning` → `LMConfig.Reasoning` → not sent (model default).
+> **Precedence:** per-request -> `AgentOptions.Reasoning` -> `LMConfig.Reasoning` -> not sent (model default).
 
 ---
 
@@ -640,17 +640,17 @@ Sampling and penalty parameters are grouped in `InferenceConfig` and follow the 
 | `RepetitionPenalty` | `double?` | Multiplier on logits of previously-seen tokens |
 
 ```csharp
-// 1 — Global default
+// 1 - Global default
 var lm = new OpenAIBackend(new LMConfig { ..., Inference = new InferenceConfig { Temperature = 0.7 } });
 
-// 2 — Per-agent default
+// 2 - Per-agent default
 var agent = new Agent(lm, new AgentOptions { Inference = new InferenceConfig { Temperature = 1.2 } });
 
-// 3 — Per-request override
+// 3 - Per-request override
 await agent.ChatStreamAsync("Write a poem.", inference: new InferenceConfig { Temperature = 1.5 });
 ```
 
-> **Precedence:** per-request → `AgentOptions.Inference` → `LMConfig.Inference` → not sent (server default).
+> **Precedence:** per-request -> `AgentOptions.Inference` -> `LMConfig.Inference` -> not sent (server default).
 
 ---
 
@@ -682,7 +682,7 @@ await agent.ChatStreamAsync("Analyse this.", model: "advanced");
 await agent.RunAsync("Summarise.", model: "some-other-model-id");
 ```
 
-> **Precedence:** per-request `model:` → `AgentOptions.Model` → `LMConfig.ModelName`.
+> **Precedence:** per-request `model:` -> `AgentOptions.Model` -> `LMConfig.ModelName`.
 
 ---
 
@@ -710,7 +710,7 @@ await agent.ChatStreamAsync("Compare these two layouts.", images: [urlA, urlB]);
 
 ## Tool Context
 
-When an MCP request arrives, Agentic captures all HTTP headers and makes them available to `[Tool]` methods via `ToolContext`. It is injected automatically — the model never sees it in the JSON schema.
+When an MCP request arrives, Agentic captures all HTTP headers and makes them available to `[Tool]` methods via `ToolContext`. It is injected automatically - the model never sees it in the JSON schema.
 
 ```csharp
 public class InvoiceTools : IAgentToolSet
@@ -757,4 +757,4 @@ toolRegistry.Register(new EmbeddingTools(lm));
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT - see [LICENSE](LICENSE).

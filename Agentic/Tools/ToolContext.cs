@@ -6,7 +6,7 @@ namespace Agentic;
 /// key-value properties set by the calling agent or workflow.
 /// <para>
 /// Declare a <see cref="ToolContext"/> parameter on any <c>[Tool]</c> method
-/// and the framework will inject it automatically — no <c>IHttpContextAccessor</c> needed.
+/// and the framework will inject it automatically - no <c>IHttpContextAccessor</c> needed.
 /// </para>
 /// </summary>
 public sealed class ToolContext

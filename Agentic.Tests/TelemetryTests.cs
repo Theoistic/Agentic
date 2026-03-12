@@ -19,24 +19,21 @@ public sealed class TelemetryTests
     [TestMethod]
     public void AgenticTelemetry_ActivitySource_HasCorrectName()
     {
-        Assert.AreEqual("Agentic", AgenticTelemetry.SourceName);
-        Assert.AreEqual("Agentic", AgenticTelemetry.ActivitySource.Name);
+        Assert.AreEqual(AgenticTelemetry.SourceName, AgenticTelemetry.ActivitySource.Name);
         Assert.AreEqual("1.0.0", AgenticTelemetry.ActivitySource.Version);
     }
 
     [TestMethod]
     public void RuntimeTelemetry_ActivitySource_HasCorrectName()
     {
-        Assert.AreEqual("Agentic.Runtime", RuntimeTelemetry.SourceName);
-        Assert.AreEqual("Agentic.Runtime", RuntimeTelemetry.ActivitySource.Name);
+        Assert.AreEqual(RuntimeTelemetry.SourceName, RuntimeTelemetry.ActivitySource.Name);
         Assert.AreEqual("1.0.0", RuntimeTelemetry.ActivitySource.Version);
     }
 
     [TestMethod]
     public void StorageTelemetry_ActivitySource_HasCorrectName()
     {
-        Assert.AreEqual("Agentic.Storage", StorageTelemetry.SourceName);
-        Assert.AreEqual("Agentic.Storage", StorageTelemetry.ActivitySource.Name);
+        Assert.AreEqual(StorageTelemetry.SourceName, StorageTelemetry.ActivitySource.Name);
         Assert.AreEqual("1.0.0", StorageTelemetry.ActivitySource.Version);
     }
 
@@ -89,7 +86,7 @@ public sealed class TelemetryTests
         Assert.AreEqual("test error", activity.StatusDescription);
 
         var events = activity.Events.ToList();
-        Assert.AreEqual(1, events.Count);
+        Assert.HasCount(1, events);
         Assert.AreEqual("exception", events[0].Name);
     }
 
@@ -177,7 +174,7 @@ public sealed class TelemetryTests
 
         listener.RecordObservableInstruments();
 
-        Assert.IsTrue(measurements.Count > 0, "Counter should have recorded at least one measurement.");
+        Assert.IsNotEmpty(measurements, "Counter should have recorded at least one measurement.");
         Assert.AreEqual(1, measurements[0]);
     }
 
@@ -197,7 +194,7 @@ public sealed class TelemetryTests
 
         AgenticTelemetry.AgentRequestDuration.Record(42.5, new KeyValuePair<string, object?>("agentic.agent.method", "Test"));
 
-        Assert.IsTrue(measurements.Count > 0, "Histogram should have recorded at least one measurement.");
+        Assert.IsNotEmpty(measurements, "Histogram should have recorded at least one measurement.");
         Assert.AreEqual(42.5, measurements[0]);
     }
 

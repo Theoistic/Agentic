@@ -43,7 +43,7 @@ public sealed class Agent : IAsyncDisposable
     /// <summary>Clears the response-chain ID, starting a fresh conversation.</summary>
     public void ResetConversation() { _lastResponseId = null; }
 
-    /// <summary>Single-shot
+    /// <summary>Single-shot /v1/responses request. Does not maintain conversation history.</summary>
     /// <param name="input">The user message to send.</param>
     /// <param name="mcpServerUrl">URL of the MCP server that supplies tools.</param>
     /// <param name="serverLabel">Optional label for the MCP server; defaults to <c>"agentic"</c>.</param>
@@ -196,7 +196,7 @@ public sealed class Agent : IAsyncDisposable
         }
     }
 
-    /// <summary>Multi-turn /v1/responses with text and images.
+    /// <summary>Multi-turn /v1/responses with text and images. Maintains conversation history across calls.</summary>
     /// <param name="text">The user message text.</param>
     /// <param name="images">Image URLs or base64 data URLs.</param>
     /// <param name="mcpServerUrl">URL of the MCP server that supplies tools.</param>
@@ -250,7 +250,7 @@ public sealed class Agent : IAsyncDisposable
         }
     }
 
-    /// <summary>Single-shot streaming
+    /// <summary>Single-shot streaming /v1/responses request with real-time events. Does not maintain conversation history.</summary>
     /// <param name="input">The user message to send.</param>
     /// <param name="mcpServerUrl">URL of the MCP server that supplies tools.</param>
     /// <param name="serverLabel">Optional label for the MCP server; defaults to <c>"agentic"</c>.</param>
@@ -400,7 +400,7 @@ public sealed class Agent : IAsyncDisposable
         }
     }
 
-    /// <summary>Multi-turn streaming /v1/responses with text and images
+    /// <summary>Multi-turn streaming /v1/responses with text and images, with real-time events.</summary>
     /// <param name="text">The user message text.</param>
     /// <param name="images">Image URLs or base64 data URLs.</param>
     /// <param name="mcpServerUrl">URL of the MCP server that supplies tools.</param>
@@ -570,7 +570,7 @@ public sealed class Agent : IAsyncDisposable
             }
             else
             {
-                break; // steps are verified in order — stop at first incomplete
+                break; // steps are verified in order - stop at first incomplete
             }
         }
     }
@@ -627,7 +627,7 @@ public sealed class Agent : IAsyncDisposable
                     pendingMcpTools[evt.OutputIndex] = evt.Item.Tool ?? evt.Item.Name ?? "";
                     break;
 
-                // Some LM servers never send this event — handled as a fallback below.
+                // Some LM servers never send this event - handled as a fallback below.
                 case "response.mcp_call.arguments.done":
                     if (pendingMcpTools.TryGetValue(evt.OutputIndex, out var toolName))
                     {

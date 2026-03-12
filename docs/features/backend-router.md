@@ -53,7 +53,7 @@ var lm = new BackendRouter()
 
 ---
 
-## Basic example — chat + embedding
+## Basic example - chat + embedding
 
 The most common pattern: a large model for reasoning, a small model for vector embeddings.
 
@@ -85,20 +85,23 @@ await using var chatBackend  = new NativeBackend(chatOptions,  LlamaBackend.Cuda
 await using var embedBackend = new NativeBackend(embedOptions, LlamaBackend.Cuda);
 
 await using var lm = new BackendRouter()
-    .Add("qwen-9b",    chatBackend,  isDefault: true)
-    .Add("embed-300m", embedBackend, isEmbedding: true);
+    .Add("chat",  chatBackend,  isDefault: true)
+    .Add("embed", embedBackend, isEmbedding: true);
 
-// Chat calls go to qwen-9b
+// Chat calls go to the default chat backend
 var agent = new Agent(lm, new AgentOptions { SystemPrompt = "You are a helpful assistant." });
-await agent.ChatStreamAsync("Explain quantum entanglement.");
+await agent.ChatStreamAsync("Summarise this document.");
 
-// Embedding calls go to embed-300m
-var vector = await lm.EmbedAsync("Hello, world!");
+// Embedding calls go to the embedding backend
+var vector = await lm.EmbedAsync("What is the warranty period?");
+
+// You can also route chat explicitly by name when multiple chat backends are registered
+var response = await lm.RespondAsync("Explain this code.", model: "chat");
 ```
 
 ---
 
-## Multi-model example — several chat backends
+## Multi-model example - several chat backends
 
 Register as many backends as needed and select between them at call time.
 
@@ -109,7 +112,7 @@ await using var lm = new BackendRouter()
     .Add("ocr",       ocrBackend)                          // vision-heavy tasks
     .Add("embed-300m", embedBackend, isEmbedding: true);
 
-// Default — routes to "fast"
+// Default - routes to "fast"
 await agent.ChatStreamAsync("What time is it?");
 
 // Explicit routing via the model parameter
@@ -126,7 +129,7 @@ The `model` string is matched **case-insensitively** against registered names. P
 
 ## Disposal
 
-`BackendRouter` disposes all registered backends when it is disposed. If backends are also wrapped in `await using` at the call site, disposal is safe — `NativeBackend` is idempotent.
+`BackendRouter` disposes all registered backends when it is disposed. If backends are also wrapped in `await using` at the call site, disposal is safe - `NativeBackend` is idempotent.
 
 ```csharp
 // Both patterns are safe
@@ -141,7 +144,7 @@ await using var lm = new BackendRouter()
 
 ## Using with `OpenAIBackend`
 
-`BackendRouter` works with any `ILLMBackend` — mix local and remote backends freely.
+`BackendRouter` works with any `ILLMBackend` - mix local and remote backends freely.
 
 ```csharp
 var remoteBackend = new OpenAIBackend(new LMConfig

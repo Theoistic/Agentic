@@ -45,7 +45,7 @@ public sealed class MultiImageNativeBackendTests
         Assert.IsTrue(File.Exists(pdfPath), $"Test asset not found: {pdfPath}");
 
         var images = RenderAllPagesAsDataUrls(pdfPath);
-        Assert.IsTrue(images.Count > 0, "No pages were rendered from the PDF.");
+        Assert.IsNotEmpty(images, "No pages were rendered from the PDF.");
 
         var llamaBackend = Enum.TryParse<LlamaBackend>(
             Environment.GetEnvironmentVariable("AGENTIC_BACKEND"), ignoreCase: true, out var b)
@@ -85,7 +85,7 @@ public sealed class MultiImageNativeBackendTests
         var logs = logWriter.ToString();
 
         Assert.IsNotNull(text);
-        Assert.IsTrue(text.Length > 0, "The model returned an empty response.");
+        Assert.IsGreaterThan(text.Length, 0, "The model returned an empty response.");
         Assert.IsTrue(logs.Contains("[generation] stop reason=", StringComparison.Ordinal), "Expected generation diagnostics to be captured in the in-memory logger.");
 
         Console.WriteLine($"[Pages rendered: {images.Count}]");

@@ -42,7 +42,7 @@ public sealed class NativeBackend : ILLMBackend, IAsyncDisposable, IDisposable
     /// from the latest GitHub release when no local installation is found, then lazily initializes
     /// the session on first use.
     /// </summary>
-    /// <param name="sessionOptions">Session options without <c>BackendDirectory</c> — it is resolved automatically.</param>
+    /// <param name="sessionOptions">Session options without <c>BackendDirectory</c> - it is resolved automatically.</param>
     /// <param name="backend">The accelerator backend to use.</param>
     /// <param name="cudaVersion">Preferred CUDA version, e.g. <c>"12.4"</c>. When <see langword="null"/> the highest available version is chosen.</param>
     /// <param name="releaseTag">Pin to a specific release tag, e.g. <c>"b8269"</c>. When <see langword="null"/> the latest release is used.</param>
@@ -392,7 +392,7 @@ public sealed class NativeBackend : ILLMBackend, IAsyncDisposable, IDisposable
             return [];
 
         var required = schemaObject.TryGetProperty("required", out var requiredElement) && requiredElement.ValueKind == JsonValueKind.Array
-            ? requiredElement.EnumerateArray().Select(item => item.GetString()).Where(name => !string.IsNullOrWhiteSpace(name)).ToHashSet(StringComparer.Ordinal)
+            ? requiredElement.EnumerateArray().Select(item => item.GetString()).OfType<string>().Where(name => !string.IsNullOrWhiteSpace(name)).ToHashSet(StringComparer.Ordinal)
             : new HashSet<string>(StringComparer.Ordinal);
 
         if (!schemaObject.TryGetProperty("properties", out var properties) || properties.ValueKind != JsonValueKind.Object)

@@ -1,5 +1,3 @@
-using System.Runtime.CompilerServices;
-
 namespace Agentic;
 
 /// <summary>
@@ -25,7 +23,7 @@ public interface ILLMBackend
         InferenceConfig? inference = null, List<ToolDefinition>? tools = null,
         ReasoningEffort? reasoning = null,
         string? model = null,
-        [EnumeratorCancellation] CancellationToken ct = default);
+        CancellationToken ct = default);
 
     IAsyncEnumerable<StreamEvent> RespondStreamingAsync(
         IEnumerable<ResponseInput> input, string? instructions = null,
@@ -33,7 +31,7 @@ public interface ILLMBackend
         InferenceConfig? inference = null, List<ToolDefinition>? tools = null,
         ReasoningEffort? reasoning = null,
         string? model = null,
-        [EnumeratorCancellation] CancellationToken ct = default);
+        CancellationToken ct = default);
 
     Task<float[]> EmbedAsync(string input, CancellationToken ct = default);
 

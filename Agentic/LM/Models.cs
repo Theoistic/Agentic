@@ -157,7 +157,7 @@ public sealed class InferenceConfig
     public double? Temperature { get; set; }
     /// <summary>Top-p (nucleus) sampling cutoff.</summary>
     public double? TopP { get; set; }
-    /// <summary>Top-k sampling — limits the candidate token pool.</summary>
+    /// <summary>Top-k sampling - limits the candidate token pool.</summary>
     public int? TopK { get; set; }
     /// <summary>Minimum probability threshold for token selection.</summary>
     public double? MinP { get; set; }

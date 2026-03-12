@@ -2,6 +2,7 @@
 using Agentic.Cli;
 using Agentic.Runtime.Core;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Agentic.Storage;
 using Mantle = Agentic.Runtime.Mantle;
 
@@ -74,9 +75,9 @@ await using var lm = new BackendRouter()
     .Add(Path.GetFileNameWithoutExtension(embedModelPath), embedBackend, isEmbedding: true);
 
 IScenario scenario = new HsCodeAnalyzerScenario();
-using var services = new ServiceCollection()
-    .AddStore()
-    .BuildServiceProvider();
+var builder = Host.CreateApplicationBuilder(args);
+builder.Services.AddStore();
+using var host = builder.Build();
 
 ConsoleHelper.PrintBanner($"Agentic CLI  ·  {scenario.Name}  ·  {Path.GetFileName(modelPath)}");
 Console.WriteLine();
@@ -94,4 +95,4 @@ else
 
 Console.WriteLine();
 
-await scenario.RunAsync(lm, services);
+await scenario.RunAsync(lm, host.Services);
